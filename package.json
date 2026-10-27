@@ -1,11 +1,26 @@
-﻿{
+{
   "name": "redlady-saas",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "pnpm --filter web dev",
-    "build": "pnpm -r build",
-    "db:generate": "pnpm --filter @redlady/db generate",
-    "db:push": "pnpm --filter @redlady/db db:push"
+    "dev": "node scripts/with-env.mjs pnpm --filter web dev",
+    "build": "pnpm db:generate && node scripts/with-env.mjs pnpm --filter web build",
+    "start": "node scripts/with-env.mjs pnpm --filter web start",
+    "lint": "pnpm --filter web lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm --filter @redlady/core test && pnpm --filter @redlady/db test",
+    "db:generate": "node scripts/with-env.mjs pnpm --filter @redlady/db generate",
+    "db:deploy": "node scripts/with-env.mjs pnpm --filter @redlady/db run migrate:deploy",
+    "db:seed": "node scripts/with-env.mjs pnpm --filter @redlady/db seed",
+    "db:setup": "node scripts/setup-db.mjs",
+    "tenant:create": "node scripts/with-env.mjs pnpm --filter @redlady/db exec tsx src/cli.ts create",
+    "migrate:all": "node scripts/with-env.mjs pnpm --filter @redlady/db exec tsx src/cli.ts migrate-all",
+    "tenant:move": "node scripts/with-env.mjs pnpm --filter @redlady/db exec tsx src/cli.ts move"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.7"
   }
 }

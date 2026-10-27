@@ -1,16 +1,35 @@
-﻿{
+{
   "name": "@redlady/db",
   "version": "0.0.1",
-  "main": "./index.ts",
-  "types": "./index.ts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "generate": "prisma generate",
-    "db:push": "prisma db push"
+    "generate": "prisma generate --schema prisma/platform/schema.prisma && prisma generate --schema prisma/tenant/schema.prisma",
+    "migrate:deploy": "prisma migrate deploy --schema prisma/platform/schema.prisma",
+    "seed": "tsx prisma/seed.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0"
+    "@aws-sdk/client-secrets-manager": "^3.716.0",
+    "@prisma/client": "^5.22.0",
+    "@redlady/core": "workspace:*",
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
-    "prisma": "^5.20.0"
+    "@types/bcryptjs": "^2.4.6",
+    "@types/pg": "^8.11.10",
+    "@types/node": "^22.10.0",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

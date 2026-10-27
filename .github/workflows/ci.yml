@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   pull_request:
@@ -6,28 +6,52 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redlady
+          POSTGRES_PASSWORD: redlady
+          POSTGRES_DB: redlady_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U redlady -d redlady_platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PLATFORM_DATABASE_URL: postgresql://redlady:redlady@localhost:5432/redlady_platform?schema=public
+      TENANT_DATABASE_URL: postgresql://redlady:redlady@localhost:5432/redladyspa?schema=public
+      TENANT_ADMIN_URL: postgresql://redlady:redlady@localhost:5432/postgres?schema=public
+      AUTH_SECRET: ci-secret-red-lady-spa-2026
+      DEFAULT_TENANT_SLUG: red-lady-spa
+      DEMO_HINTS: "true"
+      STORAGE_DRIVER: local
+      SMS_DRIVER: console
+      CRON_SECRET: ci-cron
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
+          cache: pnpm
+      - name: Install
         run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
+      - name: Generate Prisma clients
         run: pnpm db:generate
-
-      - name: Type check
-        run: pnpm --filter web exec tsc --noEmit || true
-
+      - name: Migrate and seed
+        run: pnpm db:deploy && pnpm db:seed
       - name: Lint
-        run: pnpm --filter web lint || true
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm --filter web build

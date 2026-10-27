@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: redlady
+      POSTGRES_PASSWORD: redlady
+      POSTGRES_DB: redlady_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - redlady_pg:/var/lib/postgresql/data
+      - ./docker/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redlady -d redlady_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  redlady_pg:
