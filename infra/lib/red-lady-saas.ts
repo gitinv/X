@@ -143,10 +143,23 @@ exports.handler = async () => {
     );
 
     // Lets Amplify write the server (SSR) logs to CloudWatch under /aws/amplify/<app id>.
+    // Same shape as the AWS-managed AmplifySSRLoggingPolicy.
     amplifyRole.addToPolicy(
       new iam.PolicyStatement({
-        actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups"],
+        actions: ["logs:CreateLogGroup"],
         resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws/amplify/*`],
+      }),
+    );
+    amplifyRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws/amplify/*:log-stream:*`],
+      }),
+    );
+    amplifyRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["logs:DescribeLogGroups"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:*`],
       }),
     );
 
