@@ -42,27 +42,29 @@ export function PhotoCapture({
       for (const file of Array.from(files)) {
         const bytes = await file.arrayBuffer();
         const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
+        const display = await resized(file, 1600);
+        const thumb = await resized(file, 320);
+        const displaySha256 = hex(await crypto.subtle.digest("SHA-256", await display.arrayBuffer()));
+        const thumbSha256 = hex(await crypto.subtle.digest("SHA-256", await thumb.arrayBuffer()));
         const presign = await fetch("/api/photos/presign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ appointmentId, label, sha256, contentType: file.type || "image/jpeg" }),
+          body: JSON.stringify({ appointmentId, label, sha256, displaySha256, thumbSha256, contentType: file.type || "image/jpeg" }),
         });
-        const targets = (await presign.json()) as {
-          error?: string;
-          original?: { url: string; key: string };
-          display?: { url: string; key: string };
-          thumb?: { url: string; key: string };
-        };
+        type Target = { url: string; key: string; headers?: Record<string, string> };
+        const targets = (await presign.json()) as { error?: string; original?: Target; display?: Target; thumb?: Target };
         if (!presign.ok || !targets.original || !targets.display || !targets.thumb) throw new Error(targets.error || "Upload was refused.");
-        const display = await resized(file, 1600);
-        const thumb = await resized(file, 320);
-        const uploads: [string, Blob][] = [
-          [targets.original.url, new Blob([bytes], { type: file.type || "image/jpeg" })],
-          [targets.display.url, display],
-          [targets.thumb.url, thumb],
+        const uploads: [Target, Blob][] = [
+          [targets.original, new Blob([bytes], { type: file.type || "image/jpeg" })],
+          [targets.display, display],
+          [targets.thumb, thumb],
         ];
-        for (const [url, body] of uploads) {
-          const response = await fetch(url, { method: "PUT", body, headers: { "Content-Type": "image/jpeg" } });
+        for (const [target, body] of uploads) {
+          const response = await fetch(target.url, {
+            method: "PUT",
+            body,
+            headers: target.headers ?? { "Content-Type": "image/jpeg" },
+          });
           if (!response.ok) throw new Error("The photo could not be stored.");
         }
         const saved = await fetch("/api/photos/complete", {

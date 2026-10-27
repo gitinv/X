@@ -118,6 +118,20 @@ exports.handler = async () => {
       objectLockDefaultRetention: s3.ObjectLockRetention.governance(cdk.Duration.days(365 * 3)),
       enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // Phones upload straight to S3 with a presigned PUT, so the app's sites need CORS.
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET],
+          allowedOrigins: (this.node.tryGetContext("photoCorsOrigins") as string | undefined)?.split(",") ?? [
+            "https://staging.redladyspa.com",
+            "https://app.redladyspa.com",
+            "https://*.redladyspa.com",
+            "http://localhost:3000",
+          ],
+          allowedHeaders: ["content-type", "x-amz-checksum-sha256"],
+          maxAge: 3000,
+        },
+      ],
     });
 
     const amplifyRole = new iam.Role(this, "AmplifyServiceRole", {

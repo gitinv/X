@@ -32,6 +32,8 @@ function s3() {
     region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",
     endpoint: process.env.S3_ENDPOINT || undefined,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
+    // Presigned uploads carry an explicit SHA-256 instead of a checksum of an empty body.
+    requestChecksumCalculation: "WHEN_REQUIRED",
   });
 }
 
@@ -54,13 +56,25 @@ export function verifyPhotoToken(token: string): PhotoToken | null {
   return payload;
 }
 
-export async function createUploadTarget(key: string, contentType: string, sha256?: string) {
+export type UploadTarget = { url: string; key: string; method: "PUT"; headers: Record<string, string> };
+
+/**
+ * The photo bucket uses Object Lock, so S3 refuses a PUT without a checksum header.
+ * The browser sends the SHA-256 it computed; the signature covers it, so S3 also rejects
+ * a file that does not match what was announced.
+ */
+export async function createUploadTarget(key: string, contentType: string, sha256: string): Promise<UploadTarget> {
   if (s3Enabled()) {
-    const url = await getSignedUrl(s3(), new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, ContentType: contentType }), { expiresIn: 300 });
-    return { url, key, method: "PUT" as const };
+    const checksum = Buffer.from(sha256, "hex").toString("base64");
+    const url = await getSignedUrl(
+      s3(),
+      new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, ContentType: contentType, ChecksumSHA256: checksum }),
+      { expiresIn: 300, unhoistableHeaders: new Set(["x-amz-checksum-sha256"]) },
+    );
+    return { url, key, method: "PUT", headers: { "Content-Type": contentType, "x-amz-checksum-sha256": checksum } };
   }
   const token = sign({ key, op: "put", sha256, exp: Date.now() + 5 * 60 * 1000 });
-  return { url: `/api/photos/upload?token=${encodeURIComponent(token)}`, key, method: "PUT" as const };
+  return { url: `/api/photos/upload?token=${encodeURIComponent(token)}`, key, method: "PUT", headers: { "Content-Type": contentType } };
 }
 
 export async function createDownloadUrl(key: string) {

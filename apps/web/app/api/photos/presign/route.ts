@@ -9,6 +9,8 @@ const bodySchema = z.object({
   appointmentId: z.string().min(1),
   label: z.enum(["BEFORE", "AFTER", "OTHER"]),
   sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  displaySha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  thumbSha256: z.string().regex(/^[a-f0-9]{64}$/i),
   contentType: z.string().min(1),
 });
 
@@ -42,8 +44,8 @@ export async function POST(request: Request) {
   const contentType = parsed.data.contentType.startsWith("image/") ? "image/jpeg" : "image/jpeg";
   const [original, display, thumb] = await Promise.all([
     createUploadTarget(`${base}.jpg`, contentType, parsed.data.sha256),
-    createUploadTarget(`${base}-display.jpg`, "image/jpeg"),
-    createUploadTarget(`${base}-thumb.jpg`, "image/jpeg"),
+    createUploadTarget(`${base}-display.jpg`, "image/jpeg", parsed.data.displaySha256),
+    createUploadTarget(`${base}-thumb.jpg`, "image/jpeg", parsed.data.thumbSha256),
   ]);
   return Response.json({ original, display, thumb, label: parsed.data.label });
 }
