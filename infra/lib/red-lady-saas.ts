@@ -30,7 +30,12 @@ export class RedLadySaaS extends cdk.Stack {
     const autoPauseMinutes = Number(this.node.tryGetContext("dbAutoPauseMinutes") ?? 10);
     const parameterGroup = new rds.ParameterGroup(this, "ClusterParameters", {
       engine,
-      parameters: { "rds.force_ssl": "1" },
+      parameters: {
+        "rds.force_ssl": "1",
+        // Serverless app compute freezes with idle pool connections still open, which keeps Aurora
+        // from auto-pausing. Close sessions idle longer than this (ms) so the database can pause.
+        idle_session_timeout: String(this.node.tryGetContext("dbIdleSessionTimeoutMs") ?? 600000),
+      },
     });
     const cluster = new rds.DatabaseCluster(this, "SalonData", {
       engine,
