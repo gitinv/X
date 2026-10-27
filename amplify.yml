@@ -15,6 +15,8 @@ applications:
         build:
           commands:
             - cd "$(git rev-parse --show-toplevel)" && pnpm --filter web build
+            # Prisma looks for its engine one level above the server chunks (.next/server) on Amplify.
+            - cd "$(git rev-parse --show-toplevel)" && cp packages/db/src/generated/platform/libquery_engine-rhel-openssl-3.0.x.so.node apps/web/.next/server/
       artifacts:
         baseDirectory: .next
         files:
