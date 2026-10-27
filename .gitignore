@@ -12,3 +12,4 @@ data/photos
 packages/data/
 amplify-env.json
 packages/db/src/generated
+.env.production

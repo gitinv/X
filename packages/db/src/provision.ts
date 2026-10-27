@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import pg from "pg";
 import bcrypt from "bcryptjs";
-import { evictTenant, getTenantClient, platform, urlForDatabase } from "./clients";
+import { evictTenant, getTenantClient, pgClientConfig, platform, urlForDatabase } from "./clients";
 import { clearTenantDatabase } from "./salon";
 
 const exec = promisify(execFile);
@@ -34,7 +34,7 @@ function adminUrl() {
 
 export async function createPhysicalDatabase(dbName: string, connectionString = adminUrl()) {
   if (!/^[a-z][a-z0-9_]{0,62}$/.test(dbName)) throw new Error(`Unsafe database name: ${dbName}`);
-  const client = new pg.Client({ connectionString });
+  const client = new pg.Client(pgClientConfig(connectionString));
   await client.connect();
   try {
     const existing = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
@@ -83,7 +83,7 @@ export async function resolveTenantUrl(tenant: {
 }
 
 export async function migrationVersion(databaseUrl: string) {
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const client = new pg.Client(pgClientConfig(databaseUrl));
   await client.connect();
   try {
     const rows = await client.query(
@@ -194,7 +194,7 @@ export async function provisionTenant(input: {
 }
 
 async function tableCount(databaseUrl: string, table: string) {
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const client = new pg.Client(pgClientConfig(databaseUrl));
   await client.connect();
   try {
     const rows = await client.query(`SELECT COUNT(*)::int AS count FROM "${table}"`);

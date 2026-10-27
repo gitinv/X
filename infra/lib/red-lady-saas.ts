@@ -19,7 +19,15 @@ export class RedLadySaaS extends cdk.Stack {
       subnetConfiguration: [{ name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 }],
     });
 
-    const engine = rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_16_4 });
+    // Aurora retired 16.4 for new clusters. Override with -c dbEngineVersion=16.x if needed.
+    const engineVersion = String(this.node.tryGetContext("dbEngineVersion") ?? "16.8");
+    const engine = rds.DatabaseClusterEngine.auroraPostgres({
+      version: rds.AuroraPostgresEngineVersion.of(engineVersion, engineVersion.split(".")[0]!),
+    });
+    // Capacity in ACUs. Min 0 lets Aurora pause when idle (staging); production can pass -c dbMinCapacity=0.5.
+    const minCapacity = Number(this.node.tryGetContext("dbMinCapacity") ?? 0);
+    const maxCapacity = Number(this.node.tryGetContext("dbMaxCapacity") ?? 2);
+    const autoPauseMinutes = Number(this.node.tryGetContext("dbAutoPauseMinutes") ?? 10);
     const parameterGroup = new rds.ParameterGroup(this, "ClusterParameters", {
       engine,
       parameters: { "rds.force_ssl": "1" },
@@ -29,8 +37,9 @@ export class RedLadySaaS extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       writer: rds.ClusterInstance.serverlessV2("writer", { publiclyAccessible: true }),
-      serverlessV2MinCapacity: 0.5,
-      serverlessV2MaxCapacity: 2,
+      serverlessV2MinCapacity: minCapacity,
+      serverlessV2MaxCapacity: maxCapacity,
+      ...(minCapacity === 0 ? { serverlessV2AutoPauseDuration: cdk.Duration.minutes(autoPauseMinutes) } : {}),
       storageEncrypted: true,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -50,7 +59,7 @@ export class RedLadySaaS extends cdk.Stack {
     });
 
     const publisher = new lambda.Function(this, "DatabaseUrlPublisher", {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: "index.handler",
       timeout: cdk.Duration.seconds(30),
       environment: {
@@ -87,6 +96,7 @@ exports.handler = async () => {
         parameters: { FunctionName: publisher.functionName, InvocationType: "RequestResponse" },
         physicalResourceId: cr.PhysicalResourceId.of("redlady-database-url"),
       },
+      installLatestAwsSdk: false,
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({ actions: ["lambda:InvokeFunction"], resources: [publisher.functionArn] }),
       ]),
@@ -129,6 +139,14 @@ exports.handler = async () => {
       new iam.PolicyStatement({
         actions: ["rds-db:connect"],
         resources: [`arn:aws:rds-db:${this.region}:${this.account}:dbuser:${cluster.clusterResourceIdentifier}/*`],
+      }),
+    );
+
+    // Lets Amplify write the server (SSR) logs to CloudWatch under /aws/amplify/<app id>.
+    amplifyRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws/amplify/*`],
       }),
     );
 

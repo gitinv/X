@@ -154,26 +154,20 @@ Omit `-c githubOidcProviderArn=...` only when the account has no GitHub OIDC pro
 
 Create the Amplify app in the console or with the CLI. Use a **new** app. Do not open `d3axxvf73krhuf`. Connect the GitHub repo `gitinv/X`. Set the monorepo app root to `apps/web`. Amplify reads the root `amplify.yml`.
 
-The build environment needs the real database URLs. `&` and `=` in a URL break PowerShell if you paste them into a comma-separated env list, so write a JSON file and delete it after:
+The Amplify build runs `scripts/amplify-env.sh`, which writes the settings into `.env` for the build and `apps/web/.env.production` for the server. Set these on the Amplify app (or branch):
 
-```powershell
-$secret = aws secretsmanager get-secret-value --secret-id redlady-saas/database-url --query SecretString --output text
-$admin = $secret -replace '/redlady_platform\?', '/postgres?'
-@{ environmentVariables = @{
-  PLATFORM_DATABASE_URL = $secret
-  TENANT_DATABASE_URL = $secret
-  TENANT_ADMIN_URL = $admin
-  AUTH_SECRET = "replace-with-a-long-random-string"
-  DEFAULT_TENANT_SLUG = "red-lady-spa"
-  DEMO_HINTS = "false"
-  STORAGE_DRIVER = "s3"
-  S3_BUCKET = "the-photo-bucket-name-from-cdk"
-  S3_REGION = "us-east-1"
-  AMPLIFY_MONOREPO_APP_ROOT = "apps/web"
-} } | ConvertTo-Json | Set-Content -Encoding utf8 amplify-env.json
-aws amplify update-app --app-id YOUR_NEW_APP_ID --cli-input-json file://amplify-env.json
-Remove-Item amplify-env.json
-```
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL_SECRET_ID` | `redlady-saas/database-url`. The build reads the platform URL from Secrets Manager, so the database password is not stored in Amplify. `TENANT_ADMIN_URL` is derived from it. |
+| `AUTH_SECRET` | A long random string. Different for staging and production. |
+| `DEFAULT_TENANT_SLUG` | `red-lady-spa` |
+| `DEMO_HINTS` | `true` on staging only, `false` on production |
+| `STORAGE_DRIVER` / `S3_BUCKET` / `S3_REGION` | `s3`, the photo bucket from CDK, `us-east-1` |
+| `AMPLIFY_MONOREPO_APP_ROOT` | `apps/web` |
+
+The root `.npmrc` sets `node-linker=hoisted`, which Amplify needs for pnpm monorepos.
+
+CDK context: `-c dbMinCapacity=0` (default, Aurora pauses after `dbAutoPauseMinutes`, 10 by default, and takes about 15 seconds to wake), `-c dbMaxCapacity=2`, `-c dbEngineVersion=16.8`. For production traffic consider `-c dbMinCapacity=0.5` so the first visitor never waits for a resume.
 
 Attach the CDK Amplify role as the app service role and the SSR compute role. Attach it only to this new app.
 

@@ -59,6 +59,26 @@ export function evictTenant(tenantId: string) {
 export function urlForDatabase(baseUrl: string, dbName: string) {
   const url = new URL(baseUrl);
   url.pathname = `/${dbName}`;
+  // Keep TLS and connect-timeout settings (Aurora requires TLS and can take ~15s to resume
+  // from auto-pause) but drop everything else, such as schema or pool limits.
+  const kept = ["sslmode", "connect_timeout"]
+    .map((key) => [key, url.searchParams.get(key)] as const)
+    .filter((pair): pair is readonly [string, string] => Boolean(pair[1]));
   url.search = "";
+  for (const [key, value] of kept) url.searchParams.set(key, value);
   return url.toString();
+}
+
+/**
+ * Options for node-postgres. Prisma treats sslmode=require as "encrypt, do not verify the CA".
+ * node-postgres treats it as full verification, which fails against the Amazon RDS CA that Node
+ * does not ship. Match Prisma: encrypt the connection without checking the certificate chain.
+ */
+export function pgClientConfig(connectionString: string) {
+  const url = new URL(connectionString);
+  const sslmode = url.searchParams.get("sslmode");
+  if (!sslmode || sslmode === "disable") return { connectionString };
+  url.searchParams.delete("sslmode");
+  url.searchParams.delete("schema");
+  return { connectionString: url.toString(), ssl: { rejectUnauthorized: false } };
 }
