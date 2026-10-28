@@ -13,7 +13,7 @@ import Link from "next/link";
 export const metadata = { title: "Your visits" };
 
 const messages: Record<string, string> = {
-  window: "This visit is inside the cancellation window. Call the salon and the front desk can change it.",
+  window: "Please call the studio.",
   forbidden: "That visit is not on your profile.",
   closed: "That visit can no longer be changed here.",
   confirm: "Please confirm the change before it is saved.",
@@ -120,7 +120,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                       Rebook
                     </Link>
                   ) : null}
-                  {visit.status === "BOOKED" ? <RescheduleVisitForm id={visit.id} timezone={visit.location.timezone} /> : null}
+                  {visit.status === "BOOKED" && cancellable ? <RescheduleVisitForm id={visit.id} timezone={visit.location.timezone} /> : null}
                   {cancellable ? <CancelVisitForm id={visit.id} policy={policy} /> : null}
                 </div>
                 {open && !cancellable ? <p className="mt-2 text-sm text-bark">{policy}</p> : null}

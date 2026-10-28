@@ -110,11 +110,13 @@ export function toggleBookedService<T extends { id: string; category: string; ki
 
 export function uniqueStartSlots<T extends { startIso: string }>(slots: T[]): T[] {
   const seen = new Set<string>();
-  return slots.filter((slot) => {
-    if (seen.has(slot.startIso)) return false;
-    seen.add(slot.startIso);
-    return true;
-  });
+  return slots
+    .filter((slot) => {
+      if (seen.has(slot.startIso)) return false;
+      seen.add(slot.startIso);
+      return true;
+    })
+    .sort((left, right) => left.startIso.localeCompare(right.startIso));
 }
 
 export interface SalesOrder {

@@ -41,10 +41,11 @@ export async function rescheduleOwnVisit(formData: FormData) {
   if (String(formData.get("confirm")) !== "yes") redirect("/account?error=confirm");
   const appointment = await user.db.appointment.findFirst({
     where: { id: String(formData.get("id") ?? ""), tenantId: user.tenantId },
-    include: { location: true },
+    include: { location: true, salon: true },
   });
   if (!appointment || appointment.clientId !== user.clientId) redirect("/account?error=forbidden");
   if (appointment.status !== "BOOKED") redirect("/account?error=closed");
+  if (!canCustomerCancel(appointment.startAt, new Date(), appointment.salon.cancellationWindowHours)) redirect("/account?error=window");
   const startAt = zonedDateTimeToUtc(String(formData.get("start") ?? ""), appointment.location.timezone);
   if (!startAt || startAt.getTime() < Date.now() + 60_000) redirect("/account?error=time");
   try {

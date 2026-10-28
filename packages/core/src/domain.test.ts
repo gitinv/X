@@ -90,6 +90,9 @@ describe("booking conflicts", () => {
     expect(canCustomerCancel(start, at("2026-06-02T15:00:00Z"), 2)).toBe(true);
     expect(canCustomerCancel(start, at("2026-06-02T16:30:00Z"), 2)).toBe(false);
     expect(canCustomerCancel(start, at("2026-06-02T16:00:00Z"), 2)).toBe(true);
+    const now = at("2026-10-28T15:00:00Z");
+    expect(canCustomerCancel(at("2026-10-28T22:00:00Z"), now, 24)).toBe(false);
+    expect(canCustomerCancel(at("2026-10-30T15:00:00Z"), now, 24)).toBe(true);
     expect(bookingFieldErrors({ name: "", phone: "555", email: "nope", date: "2026-10-01", today: "2026-10-28" })).toEqual({
       name: "Enter your name",
       phone: "Enter a 10-digit phone number",
@@ -450,6 +453,11 @@ describe("tickets, shifts, and favorites", () => {
     expect(uniqueStartSlots([{ startIso: "a", technicianId: "1" }, { startIso: "a", technicianId: "2" }, { startIso: "b", technicianId: "1" }])).toEqual([
       { startIso: "a", technicianId: "1" },
       { startIso: "b", technicianId: "1" },
+    ]);
+    expect(uniqueStartSlots([{ startIso: "2026-10-29T21:00:00.000Z" }, { startIso: "2026-10-29T13:00:00.000Z" }, { startIso: "2026-10-29T17:00:00.000Z" }]).map((slot) => slot.startIso)).toEqual([
+      "2026-10-29T13:00:00.000Z",
+      "2026-10-29T17:00:00.000Z",
+      "2026-10-29T21:00:00.000Z",
     ]);
     expect(serviceGroup({ category: "Mani Bar", kind: "SERVICE" })).toBe("Manicure");
     expect(serviceGroup({ category: "Pedi Bar", kind: "SERVICE" })).toBe("Pedicure");

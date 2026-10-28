@@ -76,7 +76,7 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
       });
     }
   }
-  return slots;
+  return slots.sort((left, right) => left.startIso.localeCompare(right.startIso));
 }
 
 export async function loadSlots(serviceIds: string, technicianId: string, date: string, locationSlug?: string) {
