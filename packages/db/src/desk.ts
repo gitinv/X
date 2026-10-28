@@ -1,6 +1,6 @@
 import { ensureBlockIsFree } from "./salon";
 import { createHash } from "node:crypto";
-import { checkoutTotal, discountCents, normalizePhone, refundDecision, requireServiceMinutes, requireTenantId, reservedMinutes, samePhone, ticketSummary } from "@redlady/core";
+import { assertSingleCoreServices, checkoutTotal, discountCents, normalizePhone, refundDecision, requireServiceMinutes, requireTenantId, reservedMinutes, samePhone, ticketSummary } from "@redlady/core";
 import type { Prisma, PrismaClient, ServiceKind } from "./generated/tenant";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -71,6 +71,13 @@ async function pricedLines(db: Db, tenantId: string, locationId: string, service
     ];
   });
   if (lines.length === 0) throw new Error("Please choose at least one service.");
+  const core = assertSingleCoreServices(
+    lines.map((line) => {
+      const service = services.find((item) => item.id === line.serviceId);
+      return { category: service?.category ?? line.name, kind: line.kind };
+    }),
+  );
+  if (!core.ok) throw new Error(core.reason);
   return lines;
 }
 

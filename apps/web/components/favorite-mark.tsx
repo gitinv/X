@@ -1,27 +1,52 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-export function FavoriteToggle({ technicianId, name, active }: { technicianId: string; name: string; active: boolean }) {
-  const router = useRouter();
+export function FavoriteToggle({
+  technicianId,
+  name,
+  active,
+  onChange,
+}: {
+  technicianId: string;
+  name: string;
+  active: boolean;
+  onChange?: (active: boolean) => void;
+}) {
   const [on, setOn] = useState(active);
+  const onRef = useRef(active);
+
+  function apply(next: boolean) {
+    onRef.current = next;
+    setOn(next);
+    onChange?.(next);
+  }
+
   return (
     <FavoriteMark
       active={on}
       editable
       name={name}
       onToggle={() => {
+        const previous = onRef.current;
+        const next = !previous;
+        apply(next);
         void fetch("/api/favorites", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ technicianId }),
-        }).then(async (response) => {
-          if (!response.ok) return;
-          const body = (await response.json()) as { favorite?: boolean };
-          setOn(Boolean(body.favorite));
-          router.refresh();
-        });
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              if (onRef.current === next) apply(previous);
+              return;
+            }
+            const body = (await response.json()) as { favorite?: boolean };
+            apply(Boolean(body.favorite));
+          })
+          .catch(() => {
+            if (onRef.current === next) apply(previous);
+          });
       }}
     />
   );

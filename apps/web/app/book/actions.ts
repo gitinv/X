@@ -19,6 +19,7 @@ export async function bookAppointment(input: {
   phone: string;
   email?: string;
   notes?: string;
+  idempotencyKey?: string;
 }) {
   return book(input);
 }

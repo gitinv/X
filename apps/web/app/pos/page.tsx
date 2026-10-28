@@ -68,7 +68,7 @@ export default async function PosPage({
   const low = stock.filter((row) => row.product.active && isLowStock(row.stock, row.lowStockAlert));
   const tiles = catalog.flatMap((service) => {
     const priced = pricedService(service, overrides.find((override) => override.serviceId === service.id));
-    return priced ? [{ id: service.id, name: service.name, priceCents: priced.priceCents, durationMin: priced.durationMin, kind: service.kind }] : [];
+    return priced ? [{ id: service.id, name: service.name, priceCents: priced.priceCents, durationMin: priced.durationMin, kind: service.kind, category: service.category }] : [];
   });
   const editing = visits.find((visit) => visit.id === params.visit);
   const ticketClient = params.client ? clients.find((client) => client.id === params.client) ?? (await scope.db.client.findFirst({ where: { id: params.client, tenantId: user.tenantId }, include: { favorites: true } })) : editing?.client ?? null;

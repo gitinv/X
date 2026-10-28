@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { canAccessLocation, effectiveOffer, locationCharge, rankAlternateLocations } from "./locations";
 import { canCaptureServicePhoto, canSoftDeletePhoto, canViewServicePhoto } from "./photos";
 import { shouldCacheForOffline } from "./pwa";
-import { canCustomerCancel, findBookingConflict } from "./booking";
+import { cancellationPolicyText, canCustomerCancel, findBookingConflict, sortCustomerVisits } from "./booking";
 import { InventoryError, planInventoryDecrement } from "./inventory";
 import { dollarsToCents, formatClock, parseClock } from "./money";
 import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
 import { canEditFavorites, favoriteCardClass, favoriteNote, normalizePhone, samePhone, sortByFavorite } from "./favorites";
 import { formatDateTimeLocal, listOpenSlots, nextDateKey, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
-import { blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary, uniqueStartSlots } from "./ticket";
+import { assertSingleCoreServices, blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary, toggleBookedService, uniqueStartSlots } from "./ticket";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
 const at = (iso: string) => new Date(iso);
@@ -384,7 +384,9 @@ describe("tickets, shifts, and favorites", () => {
     expect(canEditFavorites("CUSTOMER")).toBe(true);
     expect(canEditFavorites("FRONT_DESK")).toBe(false);
     expect(canEditFavorites("OWNER")).toBe(false);
-    expect(favoriteCardClass(true)).toContain("border-gold");
+    expect(favoriteCardClass(true)).toContain("border-4");
+    expect(favoriteCardClass(true)).toContain("border-gold-deep");
+    expect(favoriteCardClass(true)).not.toContain("ring-ink");
     expect(samePhone("(703) 555-0177", "17035550177")).toBe(true);
     expect(samePhone("555-0177", "703-555-0177")).toBe(false);
     expect(normalizePhone("17035550177")).toBe("7035550177");
@@ -412,6 +414,30 @@ describe("tickets, shifts, and favorites", () => {
     ]);
     expect(serviceGroup({ category: "Mani Bar", kind: "SERVICE" })).toBe("Manicure");
     expect(serviceGroup({ category: "Pedi Bar", kind: "SERVICE" })).toBe("Pedicure");
+    const menu = [
+      { id: "gel", category: "Mani Bar", kind: "SERVICE" },
+      { id: "russian", category: "Mani Bar", kind: "SERVICE" },
+      { id: "pedi", category: "Pedi Bar", kind: "SERVICE" },
+      { id: "chrome", category: "Aura", kind: "ADDON" },
+    ];
+    expect(toggleBookedService(["gel", "chrome"], menu, "russian")).toEqual(["chrome", "russian"]);
+    expect(toggleBookedService(["gel", "chrome", "pedi"], menu, "pedi")).toEqual(["gel", "chrome"]);
+    expect(assertSingleCoreServices([menu[0]!, menu[1]!]).ok).toBe(false);
+    expect(assertSingleCoreServices([menu[0]!, menu[2]!, menu[3]!]).ok).toBe(true);
+    expect(cancellationPolicyText(24, "Please call the studio.")).toBe("Free up to 24 hours before the visit. After that, please call the studio.");
+    const now = new Date("2026-10-28T15:00:00Z");
+    expect(
+      sortCustomerVisits(
+        [
+          { id: "past", startAt: new Date("2026-10-27T15:00:00Z"), status: "COMPLETED" },
+          { id: "later", startAt: new Date("2026-10-30T15:00:00Z"), status: "BOOKED" },
+          { id: "soon", startAt: new Date("2026-10-29T15:00:00Z"), status: "BOOKED" },
+          { id: "older", startAt: new Date("2026-10-20T15:00:00Z"), status: "COMPLETED" },
+          { id: "cancelled", startAt: new Date("2026-10-31T15:00:00Z"), status: "CANCELLED" },
+        ],
+        now,
+      ).map((visit) => visit.id),
+    ).toEqual(["soon", "later", "cancelled", "past", "older"]);
   });
 
   it("rejects a block that runs past the end of the shift", () => {

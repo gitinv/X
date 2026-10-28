@@ -392,6 +392,55 @@ describe("salon database rules", () => {
       }),
     ).rejects.toBeInstanceOf(BookingConflictError);
   });
+
+  it("returns the same visit for a repeated idempotency key and keeps one manicure", async () => {
+    const salon = await makeSalon("once");
+    const start = new Date("2026-08-04T15:00:00Z");
+    const end = new Date("2026-08-04T15:45:00Z");
+    const input = {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceId: salon.service.id,
+      startAt: start,
+      endAt: end,
+      idempotencyKey: "uat-double-submit",
+    };
+    const [first, second] = await Promise.all([createBooking(salon.db, input), createBooking(salon.db, input)]);
+    expect(first.id).toBe(second.id);
+    expect(await salon.db.appointment.count({ where: { tenantId: salon.tenant.id } })).toBe(1);
+    const otherMani = await salon.db.service.create({
+      data: { tenantId: salon.tenant.id, category: "Mani Bar", name: "Russian manicure", description: "test", durationMin: 60, priceCents: 8000, supplies: [] },
+    });
+    const pedi = await salon.db.service.create({
+      data: { tenantId: salon.tenant.id, category: "Pedi Bar", name: "Gel pedicure", description: "test", durationMin: 45, priceCents: 5500, supplies: [] },
+    });
+    const aura = await salon.db.service.create({
+      data: { tenantId: salon.tenant.id, category: "Aura", kind: "ADDON", name: "Chrome", description: "test", durationMin: 20, priceCents: 1500, supplies: [] },
+    });
+    await expect(
+      saveVisitTicket(salon.db, {
+        tenantId: salon.tenant.id,
+        actorId: "desk",
+        locationId: salon.location.id,
+        clientId: salon.client.id,
+        technicianId: salon.technician.id,
+        serviceIds: [salon.service.id, otherMani.id],
+        startAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+      }),
+    ).rejects.toThrow(/one manicure/i);
+    const mixed = await saveVisitTicket(salon.db, {
+      tenantId: salon.tenant.id,
+      actorId: "desk",
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceIds: [salon.service.id, pedi.id, aura.id],
+      startAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+    });
+    expect(await salon.db.appointmentLine.count({ where: { appointmentId: mixed.id } })).toBe(3);
+  });
 });
 
 afterAll(async () => {

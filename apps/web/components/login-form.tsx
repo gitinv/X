@@ -12,8 +12,8 @@ export function LoginForm({
   hints: { label: string; email: string; password: string }[];
 }) {
   const [state, action, pending] = useActionState(login, null);
-  const [email, setEmail] = useState(hints[0]?.email ?? "");
-  const [password, setPassword] = useState(hints[0]?.password ?? "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   return (
     <form action={action} className="space-y-4">

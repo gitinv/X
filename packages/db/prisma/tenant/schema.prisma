@@ -85,7 +85,8 @@ model SalonProfile {
   brandColor              String  @default("#7A1F2B")
   accentColor             String  @default("#C4A484")
   timezone                String  @default("America/New_York")
-  cancellationWindowHours Int     @default(2)
+  cancellationWindowHours Int     @default(24)
+  cancellationLatePolicy  String  @default("Please call the studio.")
   photoConsentRequired    Boolean @default(true)
 
   users        User[]
@@ -344,11 +345,13 @@ model Appointment {
   paymentStatus  PaymentStatus     @default(UNPAID)
   notes          String?
   reminderSentAt DateTime?
+  idempotencyKey String?
   createdAt      DateTime          @default(now())
   lines          AppointmentLine[]
   orders         Order[]
   photos         ServicePhoto[]
 
+  @@unique([tenantId, idempotencyKey])
   @@index([tenantId, locationId, startAt])
   @@index([tenantId, technicianId, startAt])
 }

@@ -108,12 +108,22 @@ export async function createBooking(
     startAt: Date;
     endAt: Date;
     notes?: string;
+    idempotencyKey?: string;
     lines?: { serviceId: string; name: string; kind: "SERVICE" | "ADDON"; priceCents: number; durationMin: number; bufferMin: number }[];
   },
 ) {
   const tenantId = requireTenantId(input.tenantId);
+  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+  if (idempotencyKey) {
+    const prior = await db.appointment.findFirst({ where: { tenantId, idempotencyKey } });
+    if (prior) return prior;
+  }
   try {
     return await db.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        const prior = await tx.appointment.findFirst({ where: { tenantId, idempotencyKey } });
+        if (prior) return prior;
+      }
       await ensureBlockIsFree(tx, input);
       const service = await tx.service.findFirst({ where: { id: input.serviceId, tenantId } });
       if (!service) throw new Error("That service is not on the menu.");
@@ -130,6 +140,7 @@ export async function createBooking(
           startAt: input.startAt,
           endAt: input.endAt,
           notes: input.notes,
+          idempotencyKey,
           status: "BOOKED",
           paymentStatus: "UNPAID",
         },
@@ -152,6 +163,10 @@ export async function createBooking(
       return appointment;
     });
   } catch (error) {
+    if (idempotencyKey) {
+      const prior = await db.appointment.findFirst({ where: { tenantId, idempotencyKey } });
+      if (prior) return prior;
+    }
     unavailable(error);
   }
 }

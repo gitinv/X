@@ -78,6 +78,36 @@ export function serviceGroup(service: { category: string; kind: string }) {
   return "More";
 }
 
+export function assertSingleCoreServices(services: { category: string; kind: string }[]) {
+  const manicures = services.filter((service) => serviceGroup(service) === "Manicure").length;
+  const pedicures = services.filter((service) => serviceGroup(service) === "Pedicure").length;
+  if (manicures > 1 || pedicures > 1) {
+    return { ok: false as const, reason: "Please choose one manicure and one pedicure. Add-ons can be combined." };
+  }
+  return { ok: true as const };
+}
+
+export function toggleBookedService<T extends { id: string; category: string; kind: string }>(selectedIds: string[], catalog: T[], id: string) {
+  if (selectedIds.includes(id)) return selectedIds.filter((item) => item !== id);
+  const byId = new Map(catalog.map((item) => [item.id, item]));
+  const chosen = [...selectedIds, id].map((item) => byId.get(item)).filter((item): item is T => Boolean(item));
+  let manicure = -1;
+  let pedicure = -1;
+  chosen.forEach((item, index) => {
+    const group = serviceGroup(item);
+    if (group === "Manicure") manicure = index;
+    if (group === "Pedicure") pedicure = index;
+  });
+  return chosen
+    .filter((item, index) => {
+      const group = serviceGroup(item);
+      if (group === "Manicure") return index === manicure;
+      if (group === "Pedicure") return index === pedicure;
+      return true;
+    })
+    .map((item) => item.id);
+}
+
 export function uniqueStartSlots<T extends { startIso: string }>(slots: T[]): T[] {
   const seen = new Set<string>();
   return slots.filter((slot) => {

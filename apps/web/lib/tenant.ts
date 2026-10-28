@@ -40,6 +40,7 @@ export type PublicSalon = {
   accentColor: string;
   timezone: string;
   cancellationWindowHours: number;
+  cancellationLatePolicy: string;
   photoConsentRequired: boolean;
   campaign: {
     title: string;
@@ -139,6 +140,7 @@ export async function getPublicTenant(preference?: {
     accentColor: location.accentColor || profile.accentColor,
     timezone: location.timezone || profile.timezone,
     cancellationWindowHours: profile.cancellationWindowHours,
+    cancellationLatePolicy: profile.cancellationLatePolicy,
     photoConsentRequired: profile.photoConsentRequired,
     campaign: profile.campaign,
     db,

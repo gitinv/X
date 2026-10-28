@@ -320,7 +320,8 @@ async function main() {
       brandColor: "#7A1F2B",
       accentColor: "#C4A484",
       timezone: "America/New_York",
-      cancellationWindowHours: 2,
+      cancellationWindowHours: 24,
+      cancellationLatePolicy: "Please call the studio.",
       photoConsentRequired: true,
     },
   });

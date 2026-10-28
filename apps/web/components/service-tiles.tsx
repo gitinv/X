@@ -7,6 +7,8 @@ export interface TileChoice {
   name: string;
   priceCents: number;
   durationMin: number;
+  category?: string;
+  kind?: "SERVICE" | "ADDON";
 }
 
 export function ServiceTiles({

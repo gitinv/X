@@ -11,6 +11,7 @@ const config: Config = {
         line: "#E6DFD6",
         wine: "#4A1219",
         gold: "#C4A484",
+        "gold-deep": "#6B3A12",
       },
       fontFamily: {
         serif: ["var(--font-serif)", "Georgia", "serif"],

@@ -305,6 +305,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <label className="block text-sm">About<textarea name="about" rows={4} defaultValue={user.salon.about} /></label>
           <label className="block text-sm">Brand color<input name="brandColor" defaultValue={user.salon.brandColor} /></label>
           <label className="block text-sm">Cancellation window (hours)<input name="cancellationWindowHours" defaultValue={user.salon.cancellationWindowHours} /></label>
+          <label className="block text-sm">After the window<textarea name="cancellationLatePolicy" rows={2} defaultValue={user.salon.cancellationLatePolicy} /></label>
+          <p className="text-sm text-bark">Customers can cancel free of charge until this many hours before the visit. After that, the book shows the note above and asks them to call.</p>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="photoConsentRequired" defaultChecked={user.salon.photoConsentRequired} className="h-4 w-4" />
             Require photo consent before capture

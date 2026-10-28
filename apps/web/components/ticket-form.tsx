@@ -5,7 +5,7 @@ import { FavoriteMark } from "@/components/favorite-mark";
 import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal, type TileChoice } from "@/components/service-tiles";
 import { buttonClass } from "@/components/ui";
-import { sortByFavorite } from "@redlady/core";
+import { sortByFavorite, toggleBookedService } from "@redlady/core";
 import { useMemo, useState } from "react";
 
 export function TicketForm({
@@ -38,7 +38,8 @@ export function TicketForm({
   const ordered = useMemo(() => sortByFavorite(technicians, favoriteIds), [technicians, favoriteIds]);
   const chosen = [...services, ...addons].filter((item) => selected.includes(item.id));
   function toggle(id: string) {
-    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+    const catalog = [...services, ...addons].map((item) => ({ id: item.id, category: item.category ?? "", kind: item.kind ?? "SERVICE" }));
+    setSelected((current) => toggleBookedService(current, catalog, id));
   }
   return (
     <form action={saveTicket} className="space-y-5">

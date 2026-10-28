@@ -143,7 +143,11 @@ export async function saveBranding(formData: FormData) {
       about: String(formData.get("about") ?? ""),
       brandColor: String(formData.get("brandColor") ?? "#7A1F2B"),
       photoConsentRequired: formData.get("photoConsentRequired") === "on",
-      cancellationWindowHours: Number(formData.get("cancellationWindowHours") ?? 2) || 2,
+      cancellationWindowHours: (() => {
+        const hours = Number(formData.get("cancellationWindowHours"));
+        return Number.isInteger(hours) && hours >= 0 ? hours : 24;
+      })(),
+      cancellationLatePolicy: String(formData.get("cancellationLatePolicy") ?? "").trim() || "Please call the studio.",
     },
   });
   revalidatePath("/");

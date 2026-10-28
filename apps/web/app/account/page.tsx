@@ -1,11 +1,12 @@
-import { cancelVisit } from "@/app/account/actions";
 import { CustomerFrame } from "@/components/customer-frame";
-import { Notice, buttonClass } from "@/components/ui";
-import { requireUser } from "@/lib/auth/session";
-import { createDownloadUrl } from "@/lib/photos/storage";
+import { InstallHint } from "@/components/install-hint";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { PhotoThumb } from "@/components/photo-thumb";
-import { canViewServicePhoto, favoriteNote, formatTime, formatWhen, reservedMinutes } from "@redlady/core";
+import { Notice, buttonClass } from "@/components/ui";
+import { CancelVisitForm, RescheduleVisitForm } from "@/components/visit-actions";
+import { requireUser } from "@/lib/auth/session";
+import { createDownloadUrl } from "@/lib/photos/storage";
+import { canViewServicePhoto, cancellationPolicyText, formatTime, formatWhen, reservedMinutes, sortCustomerVisits } from "@redlady/core";
 import Link from "next/link";
 
 export const metadata = { title: "Your visits" };
@@ -13,21 +14,31 @@ export const metadata = { title: "Your visits" };
 const messages: Record<string, string> = {
   window: "This visit is inside the cancellation window. Call the salon and the front desk can change it.",
   forbidden: "That visit is not on your profile.",
-  closed: "That visit can no longer be cancelled here.",
+  closed: "That visit can no longer be changed here.",
+  confirm: "Please confirm the change before it is saved.",
+  time: "Please choose a future time.",
 };
+
+function bookAgainHref(visit: { serviceId: string; technicianId: string; lines: { serviceId: string }[]; location: { slug: string } }) {
+  const services = (visit.lines.length ? visit.lines.map((line) => line.serviceId) : [visit.serviceId]).join(",");
+  return `/book?services=${services}&tech=${visit.technicianId}&location=${visit.location.slug}`;
+}
 
 export default async function AccountPage({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
   const params = await searchParams;
   const user = await requireUser();
   const visits =
     user.clientId && user.db && user.tenantId
-      ? await user.db.appointment.findMany({
-          where: { tenantId: user.tenantId, clientId: user.clientId },
-          include: { service: true, technician: true, location: true, photos: true, lines: { orderBy: { sortOrder: "asc" } }, client: { include: { favorites: true } } },
-          orderBy: { startAt: "desc" },
-        })
+      ? sortCustomerVisits(
+          await user.db.appointment.findMany({
+            where: { tenantId: user.tenantId, clientId: user.clientId },
+            include: { service: true, technician: true, location: true, photos: true, lines: { orderBy: { sortOrder: "asc" } }, client: { include: { favorites: true } } },
+          }),
+          new Date(),
+        )
       : [];
-  const windowHours = user.salon?.cancellationWindowHours ?? 2;
+  const windowHours = user.salon?.cancellationWindowHours ?? 24;
+  const policy = cancellationPolicyText(windowHours, user.salon?.cancellationLatePolicy);
   const cards = await Promise.all(
     visits.map(async (visit) => {
       const visible = visit.photos.filter((photo) =>
@@ -36,26 +47,28 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           { tenantId: photo.tenantId, clientId: photo.clientId, deletedAt: photo.deletedAt },
         ),
       );
-      const thumbs = await Promise.all(visible.map(async (photo) => ({ id: photo.id, label: photo.label, src: await createDownloadUrl(photo.thumbKey) })));
+      const thumbs = (
+        await Promise.all(visible.map(async (photo) => ({ id: photo.id, label: photo.label, src: await createDownloadUrl(photo.thumbKey) })))
+      ).filter((photo) => photo.src);
       return { visit, thumbs };
     }),
   );
+  const saved = params.saved === "moved" ? "The visit was moved." : params.saved ? "The visit was cancelled." : "";
+  const error = params.error ? (messages[params.error] ?? (params.error.includes(" ") ? params.error : "That change could not be saved.")) : "";
 
   return (
     <CustomerFrame>
       <h1 className="font-serif text-5xl italic text-wine">Your visits</h1>
       <p className="mt-2 text-sm text-bark">{user.name}</p>
-      <p className="mt-3 max-w-xl text-sm text-bark">
-        Add Red Lady to your home screen to book with one tap. On iPhone, open Share and choose Add to Home Screen. On Android, open the browser menu and choose Install app or Add to Home screen.
-      </p>
-      {params.saved ? (
+      <InstallHint />
+      {saved ? (
         <div className="mt-4">
-          <Notice>The visit was cancelled.</Notice>
+          <Notice>{saved}</Notice>
         </div>
       ) : null}
-      {params.error ? (
+      {error ? (
         <div className="mt-4">
-          <Notice tone="warn">{messages[params.error] ?? "That change could not be saved."}</Notice>
+          <Notice tone="warn">{error}</Notice>
         </div>
       ) : null}
       {!user.clientId ? (
@@ -70,7 +83,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         <ul className="mt-6 space-y-3">
           {cards.length === 0 ? <li className="text-sm text-bark">No visits yet.</li> : null}
           {cards.map(({ visit, thumbs }) => {
-            const cancellable = (visit.status === "BOOKED" || visit.status === "CHECKED_IN") && visit.startAt.getTime() - Date.now() >= windowHours * 60 * 60 * 1000;
+            const open = visit.status === "BOOKED" || visit.status === "CHECKED_IN";
+            const cancellable = open && visit.startAt.getTime() - Date.now() >= windowHours * 60 * 60 * 1000;
+            const again = bookAgainHref(visit);
             return (
               <li key={visit.id} className="rounded-3xl bg-white p-4 shadow-card">
                 <p className="font-medium">{visit.lines.length ? visit.lines.map((line) => line.name).join(", ") : visit.service.name}</p>
@@ -80,30 +95,29 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                   <FavoriteToggle technicianId={visit.technicianId} name={visit.technician.name} active={visit.client.favorites.some((favorite) => favorite.technicianId === visit.technicianId)} />
                   · {visit.location.name}
                 </p>
-                {favoriteNote(visit.client.name, visit.client.favorites.some((favorite) => favorite.technicianId === visit.technicianId) ? [visit.technician.name] : []) ? (
-                  <p className="text-sm"><span className="text-gold">★</span> {favoriteNote(visit.client.name, [visit.technician.name])}</p>
-                ) : null}
                 <p className="mt-1 text-xs uppercase tracking-[0.14em] text-bark">{visit.status.replaceAll("_", " ")}</p>
                 {thumbs.length > 0 ? (
                   <div className="mt-3 flex gap-2 overflow-x-auto">
                     {thumbs.map((photo) => (
-                      <PhotoThumb key={photo.id} src={photo.src} alt={photo.label.toLowerCase()} className="h-24 w-24 rounded-2xl object-cover" />
+                      <PhotoThumb key={photo.id} src={photo.src} alt={photo.label.toLowerCase()} quiet className="h-24 w-24 rounded-2xl object-cover" />
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   {visit.status === "COMPLETED" ? (
-                    <Link className={buttonClass("solid")} href={`/book?services=${(visit.lines.length ? visit.lines.map((line) => line.serviceId) : [visit.serviceId]).join(",")}&tech=${visit.technicianId}&location=${visit.location.slug}`}>
+                    <Link className={buttonClass("solid")} href={again}>
                       Book this again
                     </Link>
                   ) : null}
-                  {cancellable ? (
-                    <form action={cancelVisit}>
-                      <input type="hidden" name="id" value={visit.id} />
-                      <button className={buttonClass("ghost")}>Cancel visit</button>
-                    </form>
+                  {visit.status === "CANCELLED" ? (
+                    <Link className={buttonClass("solid")} href={again}>
+                      Rebook
+                    </Link>
                   ) : null}
+                  {visit.status === "BOOKED" ? <RescheduleVisitForm id={visit.id} timezone={visit.location.timezone} /> : null}
+                  {cancellable ? <CancelVisitForm id={visit.id} policy={policy} /> : null}
                 </div>
+                {open && !cancellable ? <p className="mt-2 text-sm text-bark">{policy}</p> : null}
               </li>
             );
           })}

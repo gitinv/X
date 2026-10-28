@@ -5,9 +5,9 @@ import { buttonClass } from "@/components/ui";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal } from "@/components/service-tiles";
-import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, uniqueStartSlots, type AlternateLocation } from "@redlady/core";
+import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, toggleBookedService, uniqueStartSlots, type AlternateLocation } from "@redlady/core";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface ServiceChoice {
   id: string;
@@ -43,6 +43,15 @@ interface LocationOffer {
   priceCents: number | null;
   durationMin: number | null;
   bufferMin: number | null;
+}
+
+function BookingPending() {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
+      Booking your appointment…
+    </span>
+  );
 }
 
 function offerAt(service: ServiceChoice, locationId: string | undefined, offers: LocationOffer[]): ServiceChoice | null {
@@ -108,7 +117,11 @@ export function BookingWizard({
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<{ when: string; service: string; technician: string; location: string } | null>(null);
   const [pendingAlternate, setPendingAlternate] = useState<{ locationSlug: string; locationName: string; technicianId: string; technicianName: string; startIso: string; label: string } | null>(null);
-  const orderedTechs = sortByFavorite(visibleTechs, favoriteIds);
+  const [starred, setStarred] = useState<string[]>(favoriteIds);
+  const orderSnapshot = useRef(favoriteIds);
+  const bookingLock = useRef(false);
+  const idempotencyKey = useRef(typeof crypto !== "undefined" ? crypto.randomUUID() : "");
+  const orderedTechs = sortByFavorite(visibleTechs, orderSnapshot.current);
 
   const chosen = visibleServices.filter((item) => selectedIds.includes(item.id));
   const blockMinutes = chosen.reduce((sum, item) => sum + reservedMinutes(item), 0);
@@ -147,30 +160,36 @@ export function BookingWizard({
   }, [selectedIds, technician, date, location]);
 
   async function submit(choice?: { locationSlug: string; technicianId: string; startIso: string; technicianName: string }) {
-    if (selectedIds.length === 0) return;
+    if (bookingLock.current || selectedIds.length === 0) return;
     const chosenLocation = choice?.locationSlug ?? location?.slug;
     const chosenTech = choice?.technicianId ?? technician?.id ?? slotTechId;
     const chosenStart = choice?.startIso ?? startIso;
     const techName = choice?.technicianName ?? technician?.name ?? slots.find((slot) => slot.technicianId === chosenTech)?.technicianName ?? "";
     if (!chosenLocation || !chosenStart || selectedIds.length === 0) return;
+    bookingLock.current = true;
     setPending(true);
     setError("");
-    const result = await bookAppointment({
-      serviceIds: selectedIds,
-      technicianId: chosenTech,
-      locationSlug: chosenLocation,
-      startIso: chosenStart,
-      name,
-      phone,
-      email,
-      notes,
-    });
-    setPending(false);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    try {
+      const result = await bookAppointment({
+        serviceIds: selectedIds,
+        technicianId: chosenTech,
+        locationSlug: chosenLocation,
+        startIso: chosenStart,
+        name,
+        phone,
+        email,
+        notes,
+        idempotencyKey: idempotencyKey.current,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setDone({ when: result.when, service: result.service, technician: techName || result.technician, location: result.location });
+    } finally {
+      bookingLock.current = false;
+      setPending(false);
     }
-    setDone({ when: result.when, service: result.service, technician: techName || result.technician, location: result.location });
   }
 
   if (done) {
@@ -185,7 +204,23 @@ export function BookingWizard({
           {done.location} · {done.when}
         </p>
         <p className="mt-4 text-sm text-bark">
-          A confirmation was handed to the SMS driver. <a className="underline" href="/login">Sign in</a> or <a className="underline" href="/signup">create an account</a> to see or cancel the visit.
+          You&apos;re booked! We&apos;ll text you a reminder.{" "}
+          {signedIn ? (
+            <a className="underline" href="/account">
+              Your visits
+            </a>
+          ) : (
+            <>
+              <a className="underline" href="/login">
+                Sign in
+              </a>{" "}
+              or{" "}
+              <a className="underline" href="/signup">
+                create an account
+              </a>{" "}
+              to see it later.
+            </>
+          )}
         </p>
       </section>
     );
@@ -223,7 +258,7 @@ export function BookingWizard({
                 .filter((item) => serviceGroup(item) === group)
                 .map((item) => ({ id: item.id, name: item.name, priceCents: item.priceCents, durationMin: reservedMinutes(item) }))}
               selected={selectedIds}
-              onToggle={(id) => setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))}
+              onToggle={(id) => setSelectedIds((current) => toggleBookedService(current, visibleServices, id))}
             />
           ))}
           <TicketTotal items={chosen.map((item) => ({ id: item.id, name: item.name, priceCents: item.priceCents, durationMin: reservedMinutes(item) }))} />
@@ -231,11 +266,16 @@ export function BookingWizard({
       </section>
       <aside className="h-fit space-y-4 rounded-[2rem] bg-white p-5 shadow-card lg:sticky lg:top-24">
         <h2 className="font-serif text-3xl italic">Technician</h2>
+        {signedIn ? (
+          <p className="text-sm text-bark">
+            <span className="font-medium text-ink">Favorites.</span> Star as many technicians as you like. The order updates the next time you open the book.
+          </p>
+        ) : null}
         <p className="text-sm text-bark">{blockMinutes > 0 ? `${blockMinutes} min together · ${formatCents(chosen.reduce((sum, item) => sum + item.priceCents, 0))}` : "Select services to see the block."}</p>
         <button type="button" onClick={() => setTechnician(null)} className={buttonClass(technician ? "ghost" : "solid")}>Any technician</button>
         <div className="grid grid-cols-2 gap-2">
           {orderedTechs.map((item) => {
-            const favorite = favoriteIds.includes(item.id);
+            const favorite = starred.includes(item.id);
             return (
               <div key={item.id} className={`rounded-2xl p-3 text-left ${favoriteCardClass(favorite)} ${technician?.id === item.id ? "ring-2 ring-ink" : ""}`}>
                 <span className="flex items-start justify-between gap-1">
@@ -244,7 +284,14 @@ export function BookingWizard({
                     <span className="block text-sm font-medium">{item.name}</span>
                     <span className="block text-xs text-bark">{item.roleTitle}</span>
                   </button>
-                  {signedIn ? <FavoriteToggle technicianId={item.id} name={item.name} active={favorite} /> : null}
+                  {signedIn ? (
+                    <FavoriteToggle
+                      technicianId={item.id}
+                      name={item.name}
+                      active={favorite}
+                      onChange={(next) => setStarred((current) => (next ? [...new Set([...current, item.id])] : current.filter((id) => id !== item.id)))}
+                    />
+                  ) : null}
                 </span>
               </div>
             );
@@ -307,7 +354,9 @@ export function BookingWizard({
               Book {chosen.map((item) => item.name).join(", ")} at {pendingAlternate.locationName} with {pendingAlternate.technicianName} at {pendingAlternate.label}?
             </p>
             <div className="mt-2 flex gap-2">
-              <button type="button" className={buttonClass("solid")} onClick={() => void submit(pendingAlternate)}>Confirm booking</button>
+              <button type="button" className={buttonClass("solid")} disabled={pending} aria-busy={pending} onClick={() => void submit(pendingAlternate)}>
+                {pending ? <BookingPending /> : "Confirm booking"}
+              </button>
               <button type="button" className={buttonClass("ghost")} onClick={() => setPendingAlternate(null)}>Back</button>
             </div>
           </div>
@@ -329,8 +378,8 @@ export function BookingWizard({
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
         </label>
         {error ? <p className="text-sm text-wine">{error}</p> : null}
-        <button type="button" className={buttonClass("solid", "w-full")} disabled={pending || selectedIds.length === 0 || !startIso} onClick={() => void submit()}>
-          {pending ? "Saving…" : "Book appointment"}
+        <button type="button" className={buttonClass("solid", "w-full")} disabled={pending || selectedIds.length === 0 || !startIso} aria-busy={pending} onClick={() => void submit()}>
+          {pending ? <BookingPending /> : "Book appointment"}
         </button>
       </aside>
     </div>
