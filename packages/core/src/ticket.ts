@@ -69,11 +69,22 @@ export function blockFitsShift(startMin: number, durationMin: number, windows: S
 }
 
 export function serviceGroup(service: { category: string; kind: string }) {
-  const category = service.category.toLowerCase();
-  if (service.kind === "ADDON" || category.includes("aura")) return "Aura";
-  if (category.includes("pedi")) return "Pedicure";
-  if (category.includes("mani")) return "Manicure";
+  const category = service.category.trim();
+  const lower = category.toLowerCase();
+  if (lower === "aura" || lower.startsWith("aura ")) return "Aura";
+  if (service.kind === "ADDON") return category || "Add-ons";
+  if (lower.includes("pedi")) return "Pedicure";
+  if (lower.includes("mani")) return "Manicure";
   return "More";
+}
+
+export function uniqueStartSlots<T extends { startIso: string }>(slots: T[]): T[] {
+  const seen = new Set<string>();
+  return slots.filter((slot) => {
+    if (seen.has(slot.startIso)) return false;
+    seen.add(slot.startIso);
+    return true;
+  });
 }
 
 export interface SalesOrder {

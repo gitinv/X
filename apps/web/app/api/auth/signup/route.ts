@@ -3,6 +3,7 @@ import { setSessionCookie } from "@/lib/auth/session";
 import { signSession } from "@/lib/auth/token";
 import { getPublicTenant } from "@/lib/tenant";
 import { registerCustomer } from "@redlady/db";
+import { dispatchSms } from "@/lib/sms";
 
 export async function POST(request: Request) {
   const salon = await getPublicTenant();
@@ -19,11 +20,20 @@ export async function POST(request: Request) {
       passwordHash: await hashPassword(password),
     });
     if (result.status === "verify") {
-      console.log(`Signup code for ${body?.email || body?.phone}: ${result.demoCode}`);
+      const text = `Your Red Lady code is ${result.demoCode}. It expires in 10 minutes.`;
+      if (body?.phone) {
+        try {
+          await dispatchSms(String(body.phone), text);
+        } catch (error) {
+          console.log(`[sms:console] signup code failed: ${error instanceof Error ? error.message : "unknown"}`);
+        }
+      }
+      if (body?.email) console.log(`[email:console] to=${body.email} ${text}`);
+      const demoCustomer = String(body?.email ?? "").trim().toLowerCase() === "ava@redladyspa.com";
       return Response.json({
         needsVerification: true,
         challengeId: result.challengeId,
-        ...(process.env.DEMO_HINTS === "true" ? { demoCode: result.demoCode } : {}),
+        ...(process.env.DEMO_HINTS === "true" && demoCustomer ? { demoCode: result.demoCode } : {}),
       });
     }
     const { user, client } = result;

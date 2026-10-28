@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { InventoryError, assertSameTenant, canAccessLocation, canViewServicePhoto } from "@redlady/core";
 import { getTenantClient, platform, urlForDatabase } from "./clients";
 import { createPhysicalDatabase, migrateTenantUrl } from "./provision";
-import { ExistingClientError, cancelVisit, confirmSignup, refundTicket, registerCustomer, replaceShifts, saveVisitTicket, toggleFavorite } from "./desk";
+import { ExistingClientError, cancelVisit, confirmSignup, refundTicket, registerCustomer, replaceShifts, saveVisitTicket, startVisit, toggleFavorite } from "./desk";
 import { BookingConflictError, commitCheckout, createBooking, sendDueReminders } from "./salon";
 
 const stamp = `${Date.now().toString(36)}${Math.random().toString(16).slice(2, 6)}`;
@@ -290,6 +290,7 @@ describe("salon database rules", () => {
       startAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
     });
     expect(future.status).toBe("BOOKED");
+    await expect(startVisit(salon.db, { tenantId: salon.tenant.id, appointmentId: future.id })).rejects.toThrow(/check the guest in/i);
     await salon.db.appointment.update({ where: { id: future.id }, data: { status: "IN_SERVICE" } });
     await expect(
       cancelVisit(salon.db, { tenantId: salon.tenant.id, actorId: "desk", actorRole: "FRONT_DESK", appointmentId: future.id, confirm: true }),
@@ -312,6 +313,20 @@ describe("salon database rules", () => {
         endAt: new Date("2026-08-03T15:45:00Z"),
       }),
     ).rejects.toBeInstanceOf(BookingConflictError);
+    await salon.db.businessHour.create({
+      data: { tenantId: salon.tenant.id, locationId: salon.location.id, dayOfWeek: 2, openMin: 9 * 60, closeMin: 10 * 60, closed: false },
+    });
+    await expect(
+      createBooking(salon.db, {
+        tenantId: salon.tenant.id,
+        locationId: salon.location.id,
+        clientId: salon.client.id,
+        technicianId: salon.technician.id,
+        serviceId: salon.service.id,
+        startAt: new Date("2026-08-04T09:00:00Z"),
+        endAt: new Date("2026-08-04T11:00:00Z"),
+      }),
+    ).rejects.toBeInstanceOf(BookingConflictError);
     await expect(
       saveVisitTicket(salon.db, {
         tenantId: salon.tenant.id,
@@ -332,6 +347,18 @@ describe("salon database rules", () => {
     });
     expect(retail.discountCents).toBe(500);
     expect(retail.totalCents).toBe(550);
+    const code = await registerCustomer(salon.db, {
+      tenantId: salon.tenant.id,
+      name: "Ava",
+      email: "",
+      phone: "(703) 555-0199",
+      passwordHash: "hash",
+    });
+    if (code.status !== "verify") throw new Error("expected a code");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(confirmSignup(salon.db, { tenantId: salon.tenant.id, challengeId: code.challengeId, code: "000000", name: "Ava", passwordHash: "hash" })).rejects.toThrow();
+    }
+    await expect(confirmSignup(salon.db, { tenantId: salon.tenant.id, challengeId: code.challengeId, code: code.demoCode, name: "Ava", passwordHash: "hash" })).rejects.toThrow(/new code/i);
   });
 
   it("rejects a second simultaneous booking and a block that runs past the shift", async () => {

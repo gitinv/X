@@ -108,6 +108,7 @@ export async function saveOffer(formData: FormData) {
   const available = formData.get("available") === "on";
   const price = String(formData.get("price") ?? "").trim();
   const duration = String(formData.get("duration") ?? "").trim();
+  const buffer = String(formData.get("buffer") ?? "").trim();
   const existing = await user.db.serviceLocation.findUnique({ where: { serviceId_locationId: { serviceId, locationId } } });
   const priceCents = price ? Math.round(Number(price) * 100) : existing?.priceCents ?? null;
   const parsedDuration = duration ? Number(duration) : null;
@@ -115,10 +116,15 @@ export async function saveOffer(formData: FormData) {
     redirect("/admin?tab=catalog&error=Please+enter+a+duration+greater+than+0+minutes.");
   }
   const durationMin = parsedDuration ?? existing?.durationMin ?? null;
+  const parsedBuffer = buffer ? Number(buffer) : null;
+  if (parsedBuffer !== null && (!Number.isInteger(parsedBuffer) || parsedBuffer < 0)) {
+    redirect("/admin?tab=catalog&error=Please+enter+a+buffer+of+0+minutes+or+more.");
+  }
+  const bufferMin = parsedBuffer ?? existing?.bufferMin ?? null;
   await user.db.serviceLocation.upsert({
     where: { serviceId_locationId: { serviceId, locationId } },
-    update: { available, priceCents, durationMin },
-    create: { tenantId: user.tenantId, serviceId, locationId, available, priceCents, durationMin },
+    update: { available, priceCents, durationMin, bufferMin },
+    create: { tenantId: user.tenantId, serviceId, locationId, available, priceCents, durationMin, bufferMin },
   });
   revalidatePath("/admin");
   revalidatePath("/catalog");

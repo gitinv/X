@@ -83,6 +83,8 @@ export async function saveVisitTicket(
     appointmentId?: string;
     clientId?: string;
     walkIn?: { name: string; phone: string; email?: string };
+    forceNew?: boolean;
+    actorRole?: string;
     technicianId: string;
     serviceIds: string[];
     startAt: Date;
@@ -95,7 +97,7 @@ export async function saveVisitTicket(
   let clientId = input.clientId;
   if (!clientId) {
     if (!input.walkIn || input.walkIn.name.trim().length < 2) throw new Error("Please add a client name for the walk-in.");
-    const existing = await findClientByContact(db, tenantId, input.walkIn.phone, input.walkIn.email ?? "");
+    const existing = input.forceNew ? null : await findClientByContact(db, tenantId, input.walkIn.phone, input.walkIn.email ?? "");
     if (existing) throw new ExistingClientError(existing.id, existing.name);
     const client = await db.client.create({
       data: {
@@ -115,6 +117,12 @@ export async function saveVisitTicket(
       entityId: client.id,
       summary: `Added walk-in ${client.name}.`,
     });
+  }
+  if (input.appointmentId) {
+    const current = await db.appointment.findFirst({ where: { id: input.appointmentId, tenantId } });
+    if (current?.status === "IN_SERVICE" && input.actorRole !== "MANAGER" && input.actorRole !== "OWNER") {
+      throw new Error("Please ask a manager to change a visit that is already in service.");
+    }
   }
   const primary = lines[0]!;
   const appointment = await db.$transaction(async (tx) => {
@@ -158,6 +166,14 @@ export async function saveVisitTicket(
     summary: `${input.appointmentId ? "Updated" : "Opened"} a ticket with ${lines.length} item${lines.length === 1 ? "" : "s"}.`,
   });
   return appointment;
+}
+
+export async function startVisit(db: Db, input: { tenantId: string; appointmentId: string }) {
+  const tenantId = requireTenantId(input.tenantId);
+  const visit = await db.appointment.findFirst({ where: { id: input.appointmentId, tenantId } });
+  if (!visit) throw new Error("That visit is not on this salon's book.");
+  if (visit.status !== "CHECKED_IN") throw new Error("Please check the guest in before starting the service.");
+  return db.appointment.update({ where: { id: visit.id }, data: { status: "IN_SERVICE" } });
 }
 
 function guardInService(status: string, actorRole: string | undefined) {
@@ -287,7 +303,7 @@ export async function registerCustomer(
         phone: normalizePhone(phone) || null,
         clientId: existing.id,
         codeHash: createHash("sha256").update(code).digest("hex"),
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
     });
     return { status: "verify" as const, challengeId: challenge.id, demoCode: code, clientId: existing.id };
@@ -312,9 +328,13 @@ export async function registerCustomer(
 export async function confirmSignup(db: Db, input: { tenantId: string; challengeId: string; code: string; name: string; passwordHash: string }) {
   const tenantId = requireTenantId(input.tenantId);
   const challenge = await db.signupCode.findFirst({ where: { id: input.challengeId, tenantId } });
-  if (!challenge || challenge.expiresAt.getTime() < Date.now()) throw new Error("Please request a new code.");
+  if (!challenge || challenge.expiresAt.getTime() < Date.now() || challenge.attempts >= 5) throw new Error("Please request a new code.");
   const hash = createHash("sha256").update(input.code.trim()).digest("hex");
-  if (hash !== challenge.codeHash || !challenge.clientId) throw new Error("Please check the code and try again.");
+  if (hash !== challenge.codeHash || !challenge.clientId) {
+    await db.signupCode.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
+    if (challenge.attempts + 1 >= 5) throw new Error("Please request a new code.");
+    throw new Error("Please check the code and try again.");
+  }
   const client = await db.client.findFirst({ where: { id: challenge.clientId, tenantId } });
   if (!client) throw new Error("Please request a new code.");
   const linked = await db.user.findFirst({ where: { clientId: client.id } });

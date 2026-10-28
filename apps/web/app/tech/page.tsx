@@ -2,14 +2,15 @@ import { setStaffLocation, updateVisit } from "@/app/pos/actions";
 import { LiveRefresh } from "@/components/live-refresh";
 import { PhotoCapture } from "@/components/photo-capture";
 import { StaffShell } from "@/components/shells";
-import { buttonClass } from "@/components/ui";
+import { Notice, buttonClass } from "@/components/ui";
 import { requireRoles } from "@/lib/auth/session";
 import { staffScope } from "@/lib/staff-location";
 import { buildTurnBoard, canCaptureServicePhoto, favoriteCardClass, favoriteNote, formatTime, formatWhen, reservedMinutes } from "@redlady/core";
 
 export const metadata = { title: "Tech screen" };
 
-export default async function TechPage() {
+export default async function TechPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const params = await searchParams;
   const user = await requireRoles(["TECHNICIAN", "FRONT_DESK", "MANAGER", "OWNER"]);
   const scope = await staffScope(user);
   const location = scope.current ?? scope.locations[0];
@@ -50,6 +51,7 @@ export default async function TechPage() {
   return (
     <StaffShell role={user.role} name={user.name} salon={`${user.salon.name} · ${location.name}`}>
       <LiveRefresh />
+      {params.error ? <div className="mt-4"><Notice tone="warn">{params.error}</Notice></div> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.18em] text-bark">Tech monitor</p>
@@ -132,6 +134,7 @@ export default async function TechPage() {
               return (
                 <form key={visit.id} action={updateVisit} className={`rounded-3xl p-4 ${favorite ? favoriteCardClass(true) : "bg-white shadow-card"}`}>
                   <input type="hidden" name="id" value={visit.id} />
+                  <input type="hidden" name="next" value="/tech" />
                   <p className="font-medium">{visit.client.name}</p>
                   <p className="text-sm text-bark">{(visit.lines.length ? visit.lines.map((line) => line.name).join(", ") : visit.service.name)} · {visit.technician.name}</p>
                   <p className="text-sm text-bark">{formatTime(visit.startAt, location.timezone)}–{formatTime(visit.endAt, location.timezone)} · {(visit.lines.reduce((sum, line) => sum + reservedMinutes(line), 0) || Math.round((visit.endAt.getTime() - visit.startAt.getTime()) / 60000))} min</p>

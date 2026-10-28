@@ -198,6 +198,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             const override = service.locations.find((row) => row.locationId === location.id);
             const price = ((override?.priceCents ?? service.priceCents) / 100).toFixed(2);
             const minutes = override?.durationMin ?? service.durationMin;
+            const buffer = override?.bufferMin ?? service.bufferMin;
             const offered = override ? override.available : true;
             return (
             <li key={service.id}>
@@ -207,6 +208,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 <p className="text-sm font-medium">{service.name}<span className="block text-bark">Catalog {formatCents(service.priceCents)} · {service.durationMin} min</span></p>
                 <label className="text-xs text-bark">Price<input name="price" defaultValue={price} /></label>
                 <label className="text-xs text-bark">Minutes<input name="duration" defaultValue={minutes} /></label>
+                <label className="text-xs text-bark">Buffer<input name="buffer" type="number" min={0} defaultValue={buffer} /></label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="available" defaultChecked={offered} className="h-4 w-4" />Offered</label>
                 <button className={buttonClass("solid")}>Save</button>
               </form>

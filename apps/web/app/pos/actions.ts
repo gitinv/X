@@ -5,7 +5,7 @@ import { publicError } from "@/lib/errors";
 import { assertLocation, staffScope } from "@/lib/staff-location";
 import { STAFF_LOCATION_COOKIE } from "@/lib/tenant";
 import { discountCents, zonedDateTimeToUtc } from "@redlady/core";
-import { ExistingClientError, cancelVisit, commitCheckout, refundTicket, rescheduleVisit, saveVisitTicket } from "@redlady/db";
+import { BookingConflictError, ExistingClientError, cancelVisit, commitCheckout, ensureBlockIsFree, refundTicket, rescheduleVisit, saveVisitTicket, startVisit } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -25,38 +25,63 @@ export async function setStaffLocation(formData: FormData) {
 export async function updateVisit(formData: FormData) {
   const user = await requireRoles(["FRONT_DESK", "MANAGER", "OWNER", "TECHNICIAN"]);
   if (!user.db || !user.tenantId) redirect("/login");
+  const next = String(formData.get("next") ?? "/pos");
+  const back = next.startsWith("/") ? next : "/pos";
+  const fail = (message: string) => redirect(`${back}${back.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`);
   const visit = await user.db.appointment.findFirst({ where: { id: String(formData.get("id") ?? ""), tenantId: user.tenantId } });
-  if (!visit) redirect("/pos");
+  if (!visit) redirect(back);
   assertLocation(user, visit.locationId);
   const status = String(formData.get("status") ?? "");
-  if (status === "CHECKED_IN" || status === "IN_SERVICE" || status === "READY" || status === "NO_SHOW") {
-    await user.db.appointment.update({ where: { id: visit.id }, data: { status } });
-    if (status === "READY" || status === "IN_SERVICE") {
+  try {
+    if (status === "IN_SERVICE") {
+      await startVisit(user.db, { tenantId: user.tenantId, appointmentId: visit.id });
       await user.db.auditEvent.create({
-        data: {
-          tenantId: user.tenantId,
-          actorId: user.id,
-          action: status === "READY" ? "SERVICE_FINISH" : "SERVICE_START",
-          entityType: "Appointment",
-          entityId: visit.id,
-          summary: status === "READY" ? "Finished the service and sent it to checkout." : "Started the service.",
-        },
+        data: { tenantId: user.tenantId, actorId: user.id, action: "SERVICE_START", entityType: "Appointment", entityId: visit.id, summary: "Started the service." },
       });
     }
-  }
-  const technicianId = String(formData.get("technicianId") ?? "");
-  if (technicianId) {
-    const assigned = await user.db.technicianLocation.findFirst({
-      where: { tenantId: user.tenantId, technicianId, locationId: visit.locationId, active: true },
-    });
-    if (assigned) await user.db.appointment.update({ where: { id: visit.id }, data: { technicianId } });
-  }
-  if (formData.get("consent") === "on") {
-    await user.db.client.update({ where: { id: visit.clientId }, data: { photoConsentAt: new Date(), photoConsentById: user.id } });
+    if (status === "CHECKED_IN" || status === "READY" || status === "NO_SHOW") {
+      await user.db.appointment.update({ where: { id: visit.id }, data: { status } });
+      if (status === "READY") {
+        await user.db.auditEvent.create({
+          data: {
+            tenantId: user.tenantId,
+            actorId: user.id,
+            action: status === "READY" ? "SERVICE_FINISH" : "SERVICE_START",
+            entityType: "Appointment",
+            entityId: visit.id,
+            summary: "Finished the service and sent it to checkout.",
+          },
+        });
+      }
+    }
+    const technicianId = String(formData.get("technicianId") ?? "");
+    if (technicianId && technicianId !== visit.technicianId) {
+      const assigned = await user.db.technicianLocation.findFirst({
+        where: { tenantId: user.tenantId, technicianId, locationId: visit.locationId, active: true },
+      });
+      if (!assigned) fail("That technician is not at this studio.");
+      await user.db.$transaction(async (tx) => {
+        await ensureBlockIsFree(tx, {
+          tenantId: user.tenantId!,
+          technicianId,
+          locationId: visit.locationId,
+          startAt: visit.startAt,
+          endAt: visit.endAt,
+          ignoreAppointmentId: visit.id,
+        });
+        await tx.appointment.update({ where: { id: visit.id }, data: { technicianId } });
+      });
+    }
+    if (formData.get("consent") === "on") {
+      await user.db.client.update({ where: { id: visit.clientId }, data: { photoConsentAt: new Date(), photoConsentById: user.id } });
+    }
+  } catch (error) {
+    if (error instanceof BookingConflictError) fail(error.message);
+    fail(publicError(error));
   }
   revalidatePath("/pos");
   revalidatePath("/tech");
-  redirect("/pos");
+  redirect(back);
 }
 
 export async function takePayment(formData: FormData) {
@@ -115,6 +140,8 @@ export async function saveTicket(formData: FormData) {
     await saveVisitTicket(user.db, {
       tenantId: user.tenantId,
       actorId: user.id,
+      actorRole: user.role,
+      forceNew: formData.get("forceNew") === "yes",
       locationId,
       appointmentId: appointmentId || undefined,
       clientId: String(formData.get("clientId") ?? "") || undefined,
@@ -124,7 +151,15 @@ export async function saveTicket(formData: FormData) {
       startAt,
     });
   } catch (error) {
-    if (error instanceof ExistingClientError) redirect(`/pos?tab=ticket&match=${error.clientId}`);
+    if (error instanceof ExistingClientError) {
+      const keep = new URLSearchParams({ tab: "ticket", match: error.clientId });
+      if (appointmentId) keep.set("visit", appointmentId);
+      if (when) keep.set("start", when);
+      const tech = String(formData.get("technicianId") ?? "");
+      if (tech) keep.set("tech", tech);
+      for (const id of serviceIds) keep.append("service", id);
+      redirect(`/pos?${keep.toString()}`);
+    }
     redirect(`/pos?tab=ticket&error=${encodeURIComponent(publicError(error))}`);
   }
   revalidatePath("/pos");

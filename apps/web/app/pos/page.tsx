@@ -13,7 +13,7 @@ export const metadata = { title: "Front desk" };
 export default async function PosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; saved?: string; error?: string; q?: string; visit?: string; confirm?: string; move?: string; client?: string; match?: string }>;
+  searchParams: Promise<{ tab?: string; saved?: string; error?: string; q?: string; visit?: string; confirm?: string; move?: string; client?: string; match?: string; service?: string | string[]; tech?: string; start?: string; force?: string }>;
 }) {
   const params = await searchParams;
   const user = await requireRoles(["FRONT_DESK", "MANAGER", "OWNER"]);
@@ -122,6 +122,7 @@ export default async function PosPage({
                 </div>
                 <form action={updateVisit} className="mt-3 flex flex-wrap items-center gap-2">
                   <input type="hidden" name="id" value={visit.id} />
+                  <input type="hidden" name="next" value="/pos" />
                   <select name="technicianId" defaultValue={visit.technicianId} className="w-auto">
                     {technicians.map((tech) => (
                       <option key={tech.id} value={tech.id}>{visit.client.favorites.some((favorite) => favorite.technicianId === tech.id) ? `★ ${tech.name}` : tech.name}</option>
@@ -163,7 +164,10 @@ export default async function PosPage({
         <div className="mt-6 space-y-4">
           {params.match ? (
             <Notice>
-              That phone or email is already a client. <Link href={`/pos?tab=ticket&client=${params.match}`} className="underline">Use this profile</Link> instead of creating another.
+              That phone or email is already a client.{" "}
+              <Link href={`/pos?tab=ticket&client=${params.match}${params.tech ? `&tech=${params.tech}` : ""}${params.start ? `&start=${encodeURIComponent(params.start)}` : ""}${[params.service].flat().filter(Boolean).map((id) => `&service=${id}`).join("")}`} className="underline">Use this profile</Link>
+              {" "}or{" "}
+              <Link href={`/pos?tab=ticket&force=1${params.tech ? `&tech=${params.tech}` : ""}${params.start ? `&start=${encodeURIComponent(params.start)}` : ""}${[params.service].flat().filter(Boolean).map((id) => `&service=${id}`).join("")}`} className="underline">Create a separate profile</Link>.
             </Notice>
           ) : null}
           <TicketForm
@@ -173,10 +177,11 @@ export default async function PosPage({
             addons={tiles.filter((item) => item.kind === "ADDON")}
             technicians={technicians.map((tech) => ({ id: tech.id, name: tech.name }))}
             favoriteIds={favoriteIds}
-            initialServiceIds={editing?.lines.map((line) => line.serviceId) ?? []}
-            initialTechnicianId={editing?.technicianId}
-            initialStart={editing ? formatDateTimeLocal(editing.startAt, location.timezone) : undefined}
-            client={ticketClient ? { id: ticketClient.id, name: ticketClient.name } : null}
+            initialServiceIds={editing?.lines.map((line) => line.serviceId) ?? [params.service].flat().filter((id): id is string => Boolean(id))}
+            initialTechnicianId={editing?.technicianId ?? params.tech}
+            initialStart={editing ? formatDateTimeLocal(editing.startAt, location.timezone) : params.start}
+            forceNew={params.force === "1"}
+            client={params.force === "1" ? null : ticketClient ? { id: ticketClient.id, name: ticketClient.name } : null}
           />
         </div>
       ) : null}

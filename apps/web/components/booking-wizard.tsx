@@ -5,7 +5,7 @@ import { buttonClass } from "@/components/ui";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal } from "@/components/service-tiles";
-import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, type AlternateLocation } from "@redlady/core";
+import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, uniqueStartSlots, type AlternateLocation } from "@redlady/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -215,7 +215,7 @@ export function BookingWizard({
           ))}
         </div>
         <div className="space-y-5">
-          {(["Manicure", "Pedicure", "Aura", "More"] as const).map((group) => (
+          {["Manicure", "Pedicure", "Aura", ...[...new Set(visibleServices.map((item) => serviceGroup(item)))].filter((group) => !["Manicure", "Pedicure", "Aura", "More"].includes(group)).sort(), "More"].map((group) => (
             <ServiceTiles
               key={group}
               title={group === "Aura" ? "Aura add-ons" : group === "More" ? "More services" : group}
@@ -257,9 +257,9 @@ export function BookingWizard({
         <div className="flex flex-wrap gap-2">
           {loadingSlots ? <p className="text-sm text-bark">Checking the book…</p> : null}
           {!loadingSlots && selectedIds.length > 0 && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
-          {slots.map((slot) => (
-            <button key={`${slot.technicianId}-${slot.startIso}`} type="button" onClick={() => { setStartIso(slot.startIso); setSlotTechId(slot.technicianId); }} className={buttonClass(startIso === slot.startIso && slotTechId === slot.technicianId ? "solid" : "ghost", "px-3 py-2")}>
-              {slot.label}{technician ? "" : ` · ${slot.technicianName}`}
+          {(technician ? slots : uniqueStartSlots(slots)).map((slot) => (
+            <button key={slot.startIso} type="button" onClick={() => { setStartIso(slot.startIso); setSlotTechId(technician ? slot.technicianId : ""); }} className={buttonClass(startIso === slot.startIso ? "solid" : "ghost", "px-3 py-2")}>
+              {slot.label}
             </button>
           ))}
         </div>

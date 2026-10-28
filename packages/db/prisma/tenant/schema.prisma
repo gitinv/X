@@ -411,6 +411,7 @@ model SignupCode {
   phone     String?
   clientId  String?
   codeHash  String
+  attempts  Int          @default(0)
   expiresAt DateTime
   createdAt DateTime     @default(now())
 

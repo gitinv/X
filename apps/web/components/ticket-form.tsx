@@ -18,6 +18,7 @@ export function TicketForm({
   initialServiceIds,
   initialTechnicianId,
   initialStart,
+  forceNew,
   client,
 }: {
   locationId: string;
@@ -29,6 +30,7 @@ export function TicketForm({
   initialServiceIds: string[];
   initialTechnicianId?: string;
   initialStart?: string;
+  forceNew?: boolean;
   client: { id: string; name: string } | null;
 }) {
   const [selected, setSelected] = useState(initialServiceIds);
@@ -42,6 +44,7 @@ export function TicketForm({
     <form action={saveTicket} className="space-y-5">
       <input type="hidden" name="locationId" value={locationId} />
       {appointmentId ? <input type="hidden" name="appointmentId" value={appointmentId} /> : null}
+      {forceNew ? <input type="hidden" name="forceNew" value="yes" /> : null}
       {client ? <input type="hidden" name="clientId" value={client.id} /> : null}
       <input type="hidden" name="technicianId" value={technicianId} />
       {selected.map((id) => (

@@ -43,6 +43,7 @@ export default async function CatalogPage({ searchParams }: { searchParams: Prom
                         <p className="text-sm font-medium">{service.name}</p>
                         <label className="text-xs">Price<input name="price" defaultValue={((override?.priceCents ?? service.priceCents) / 100).toFixed(2)} /></label>
                         <label className="text-xs">Minutes<input name="duration" type="number" min={1} defaultValue={override?.durationMin ?? service.durationMin} /></label>
+                        <label className="text-xs">Buffer<input name="buffer" type="number" min={0} defaultValue={override?.bufferMin ?? service.bufferMin} /></label>
                         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="available" defaultChecked={override ? override.available : true} className="h-4 w-4" />Offered</label>
                         <button className={buttonClass("solid")}>Save</button>
                       </form>

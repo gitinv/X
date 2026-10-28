@@ -9,7 +9,7 @@ import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
 import { canEditFavorites, favoriteCardClass, favoriteNote, normalizePhone, samePhone, sortByFavorite } from "./favorites";
 import { formatDateTimeLocal, listOpenSlots, nextDateKey, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
-import { blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary } from "./ticket";
+import { blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary, uniqueStartSlots } from "./ticket";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
 const at = (iso: string) => new Date(iso);
@@ -405,6 +405,11 @@ describe("tickets, shifts, and favorites", () => {
     expect(requireServiceMinutes(30, -1).ok).toBe(false);
     expect(requireServiceMinutes(30, 5)).toEqual({ ok: true, reservedMin: 35 });
     expect(serviceGroup({ category: "Aura", kind: "ADDON" })).toBe("Aura");
+    expect(serviceGroup({ category: "Finish", kind: "ADDON" })).toBe("Finish");
+    expect(uniqueStartSlots([{ startIso: "a", technicianId: "1" }, { startIso: "a", technicianId: "2" }, { startIso: "b", technicianId: "1" }])).toEqual([
+      { startIso: "a", technicianId: "1" },
+      { startIso: "b", technicianId: "1" },
+    ]);
     expect(serviceGroup({ category: "Mani Bar", kind: "SERVICE" })).toBe("Manicure");
     expect(serviceGroup({ category: "Pedi Bar", kind: "SERVICE" })).toBe("Pedicure");
   });

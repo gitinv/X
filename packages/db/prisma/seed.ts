@@ -3,6 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { nextDateKey, zonedDayKey, zonedTimeToUtc } from "@redlady/core";
 import type { ProductCategory } from "../src/generated/tenant";
 import { getTenantClient, platform, urlForDatabase } from "../src/clients";
 import { createPhysicalDatabase, migrateTenantUrl, resolveTenantUrl } from "../src/provision";
@@ -109,7 +111,7 @@ const services: {
     sortOrder: 100,
   },
   {
-    category: "Add Aura",
+    category: "Finish",
     kind: "ADDON",
     name: "Gel Polish Change",
     description: "Soak-off and a fresh gel color.",
@@ -119,7 +121,7 @@ const services: {
     sortOrder: 110,
   },
   {
-    category: "Add Aura",
+    category: "Finish",
     kind: "ADDON",
     name: "Paraffin Treatment",
     description: "Warm paraffin mittens or booties after a service.",
@@ -577,7 +579,42 @@ async function main() {
       tenantId,
     },
   });
-  const now = Date.now();
+  const tz = "America/New_York";
+  const addDays = (key: string, days: number) => {
+    let current = key;
+    for (let step = 0; step < Math.abs(days); step += 1) {
+      if (days > 0) current = nextDateKey(current);
+      else {
+        const [year, month, day] = current.split("-").map(Number);
+        const date = new Date(Date.UTC(year!, month! - 1, day));
+        date.setUTCDate(date.getUTCDate() - 1);
+        current = date.toISOString().slice(0, 10);
+      }
+    }
+    return current;
+  };
+  const weekdayOf = (key: string) => {
+    const [year, month, day] = key.split("-").map(Number);
+    return new Date(Date.UTC(year!, month! - 1, day)).getUTCDay();
+  };
+  const placeVisit = (dayOffset: number, preferredMin: number, durationMin: number, studio: "chantilly" | "fairfax") => {
+    let key = addDays(zonedDayKey(new Date(), tz), dayOffset);
+    for (let hop = 0; hop < 8; hop += 1) {
+      const day = weekdayOf(key);
+      const sunday = day === 0;
+      const closed = studio === "fairfax" && sunday;
+      const open = sunday ? 10 * 60 : studio === "fairfax" ? 10 * 60 : 9 * 60;
+      const close = sunday ? (studio === "chantilly" ? 17 * 60 : 16 * 60) : 19 * 60;
+      if (!closed) {
+        const startMin = Math.max(preferredMin, open);
+        if (startMin + durationMin <= close) {
+          return { startAt: zonedTimeToUtc(key, startMin, tz), endAt: zonedTimeToUtc(key, startMin + durationMin, tz) };
+        }
+      }
+      key = nextDateKey(key);
+    }
+    throw new Error("No open studio hour for the demo visit.");
+  };
   const lavender = byName("Organic Lavender Pedicure");
   const dip = byName("Dipping Powder (Dip Nails)");
   const classic = byName("The Red Lady Classic Manicure");
@@ -590,8 +627,7 @@ async function main() {
       clientId: ava.id,
       technicianId: chloe.id,
       serviceId: classic.id,
-      startAt: new Date(now - 3 * 24 * 60 * 60 * 1000),
-      endAt: new Date(now - 3 * 24 * 60 * 60 * 1000 + classic.durationMin * 60 * 1000),
+      ...placeVisit(-3, 11 * 60, classic.durationMin, "chantilly"),
       status: "COMPLETED",
       paymentStatus: "PAID",
     },
@@ -603,8 +639,7 @@ async function main() {
       clientId: eleanor.id,
       technicianId: yuki.id,
       serviceId: velvet.id,
-      startAt: new Date(now - 5 * 60 * 60 * 1000),
-      endAt: new Date(now - 5 * 60 * 60 * 1000 + velvet.durationMin * 60 * 1000),
+      ...placeVisit(-1, 11 * 60, velvet.durationMin, "chantilly"),
       status: "COMPLETED",
       paymentStatus: "PAID",
     },
@@ -617,8 +652,7 @@ async function main() {
         clientId: eleanor.id,
         technicianId: chloe.id,
         serviceId: gel.id,
-        startAt: new Date(now - 20 * 60 * 1000),
-        endAt: new Date(now - 20 * 60 * 1000 + gel.durationMin * 60 * 1000),
+        ...placeVisit(0, 14 * 60, gel.durationMin, "chantilly"),
         status: "IN_SERVICE",
         paymentStatus: "UNPAID",
       },
@@ -628,8 +662,7 @@ async function main() {
         clientId: gemma.id,
         technicianId: sophia.id,
         serviceId: lavender.id,
-        startAt: new Date(now + 35 * 60 * 1000),
-        endAt: new Date(now + 35 * 60 * 1000 + lavender.durationMin * 60 * 1000),
+        ...placeVisit(0, 16 * 60, lavender.durationMin, "chantilly"),
         status: "CHECKED_IN",
         paymentStatus: "UNPAID",
       },
@@ -639,8 +672,7 @@ async function main() {
         clientId: noah.id,
         technicianId: marcus.id,
         serviceId: dip.id,
-        startAt: new Date(now + 95 * 60 * 1000),
-        endAt: new Date(now + 95 * 60 * 1000 + dip.durationMin * 60 * 1000),
+        ...placeVisit(0, 15 * 60, dip.durationMin, "fairfax"),
         status: "BOOKED",
         paymentStatus: "UNPAID",
         notes: "First visit. Wants a short square.",
@@ -651,8 +683,7 @@ async function main() {
         clientId: ava.id,
         technicianId: chloe.id,
         serviceId: classic.id,
-        startAt: new Date(now + 24 * 60 * 60 * 1000),
-        endAt: new Date(now + 24 * 60 * 60 * 1000 + classic.durationMin * 60 * 1000),
+        ...placeVisit(1, 11 * 60, classic.durationMin, "chantilly"),
         status: "BOOKED",
         paymentStatus: "UNPAID",
       },
@@ -662,8 +693,7 @@ async function main() {
         clientId: priya.id,
         technicianId: yuki.id,
         serviceId: change.id,
-        startAt: new Date(now - 5 * 60 * 1000),
-        endAt: new Date(now - 5 * 60 * 1000 + change.durationMin * 60 * 1000),
+        ...placeVisit(0, 12 * 60, change.durationMin, "fairfax"),
         status: "CHECKED_IN",
         paymentStatus: "UNPAID",
       },
@@ -689,6 +719,13 @@ async function main() {
     const file = path.join(photoDir, key);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, jpeg);
+  }
+  if (process.env.STORAGE_DRIVER === "s3" && process.env.S3_BUCKET) {
+    const checksum = createHash("sha256").update(jpeg).digest("base64");
+    const photos = new S3Client({ region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1", requestChecksumCalculation: "WHEN_REQUIRED" });
+    for (const key of [originalKey, displayKey, thumbKey]) {
+      await photos.send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, Body: jpeg, ContentType: "image/jpeg", ChecksumSHA256: checksum }));
+    }
   }
   const uploader = avaUser.id;
   await db.servicePhoto.create({

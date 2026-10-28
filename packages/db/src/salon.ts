@@ -61,12 +61,17 @@ export async function ensureBlockIsFree(
   if (input.endAt.getTime() <= input.startAt.getTime()) throw new BookingConflictError("duration");
   const location = await db.location.findFirst({ where: { id: input.locationId, tenantId } });
   const timeZone = location?.timezone || "UTC";
+  const day = weekdayInZone(input.startAt, timeZone);
+  const durationMin = Math.round((input.endAt.getTime() - input.startAt.getTime()) / 60_000);
+  const startMin = minutesInZone(input.startAt, timeZone);
+  const hours = await db.businessHour.findFirst({ where: { tenantId, locationId: input.locationId, dayOfWeek: day } });
+  if (hours && (hours.closed || !blockFitsShift(startMin, durationMin, [{ startMin: hours.openMin, endMin: hours.closeMin }], true))) {
+    throw new BookingConflictError("hours");
+  }
   const shifts = await db.shift.findMany({ where: { tenantId, technicianId: input.technicianId, locationId: input.locationId } });
   if (shifts.length > 0) {
-    const day = weekdayInZone(input.startAt, timeZone);
     const windows = shifts.filter((shift) => shift.active && shift.dayOfWeek === day);
-    const durationMin = Math.round((input.endAt.getTime() - input.startAt.getTime()) / 60_000);
-    if (!blockFitsShift(minutesInZone(input.startAt, timeZone), durationMin, windows, true)) throw new BookingConflictError("shift");
+    if (!blockFitsShift(startMin, durationMin, windows, true)) throw new BookingConflictError("shift");
   }
   const existing = await db.appointment.findMany({
     where: { tenantId, technicianId: input.technicianId, ...(input.ignoreAppointmentId ? { id: { not: input.ignoreAppointmentId } } : {}) },
