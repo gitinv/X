@@ -1,5 +1,6 @@
 import { LoginForm } from "@/components/login-form";
 import { demoHints } from "@/lib/demo-accounts";
+import Link from "next/link";
 
 export const metadata = { title: "Sign in" };
 
@@ -15,7 +16,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </p>
       </div>
       <div className="rounded-[2rem] bg-white p-6 shadow-card">
-        <LoginForm next={params.next} hints={demoHints()} />
+        <Link href="/" className="text-sm text-bark underline">Home</Link>
+        <div className="mt-4">
+          <LoginForm next={params.next} hints={demoHints()} />
+        </div>
+        <p className="mt-4 text-sm"><Link href="/signup" className="underline">Create an account</Link></p>
       </div>
     </main>
   );

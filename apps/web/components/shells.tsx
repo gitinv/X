@@ -77,6 +77,7 @@ export function StaffShell({
   const links = [
     { href: "/pos", label: "Front desk", show: role === "FRONT_DESK" || role === "MANAGER" || role === "OWNER" },
     { href: "/tech", label: "Tech screen", show: role === "TECHNICIAN" || role === "FRONT_DESK" || role === "MANAGER" || role === "OWNER" },
+    { href: "/catalog", label: "Catalog", show: role === "FRONT_DESK" || role === "MANAGER" || role === "OWNER" },
     { href: "/admin", label: "Owner portal", show: role === "MANAGER" || role === "OWNER" },
     { href: "/platform", label: "All salons", show: role === "PLATFORM_ADMIN" },
     { href: "/", label: "Customer site", show: true },

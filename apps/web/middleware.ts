@@ -30,7 +30,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/health") ||
     pathname.startsWith("/api/billing/webhook") ||
     pathname.startsWith("/api/jobs/reminders") ||
-    pathname.startsWith("/api/auth/login")
+    pathname.startsWith("/api/auth/login") ||
+    pathname.startsWith("/api/auth/signup")
   ) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }

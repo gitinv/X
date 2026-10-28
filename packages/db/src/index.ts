@@ -4,3 +4,4 @@ export type { PlatformUser, Tenant as RegistryTenant } from "./generated/platfor
 export { Prisma, PrismaClient as TenantClient } from "./generated/tenant";
 export * from "./provision";
 export * from "./salon";
+export * from "./desk";

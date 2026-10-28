@@ -31,7 +31,7 @@ export default async function BookPage({
       include: { locations: true },
       orderBy: { sortOrder: "asc" },
     }),
-    session?.clientId ? salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id } }) : Promise.resolve(null),
+    session?.clientId ? salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id }, include: { favorites: true } }) : Promise.resolve(null),
     salon.db.serviceLocation.findMany({ where: { tenantId: salon.id } }),
   ]);
   const tomorrow = zonedDayKey(new Date(Date.now() + 24 * 60 * 60 * 1000), salon.location.timezone);
@@ -73,6 +73,8 @@ export default async function BookPage({
         presetLocationSlug={salon.location.slug}
         suggestNearest={!params.location && !params.near && !hasCookie && !client?.lastLocationId}
         guest={client ? { name: client.name, phone: client.phone ?? "", email: client.email ?? "" } : null}
+        favoriteIds={client?.favorites.map((favorite) => favorite.technicianId) ?? []}
+        signedIn={Boolean(client)}
       />
     </CustomerFrame>
   );

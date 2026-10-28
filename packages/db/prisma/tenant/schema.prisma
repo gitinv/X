@@ -24,6 +24,7 @@ enum AppointmentStatus {
   BOOKED
   CHECKED_IN
   IN_SERVICE
+  READY
   COMPLETED
   CANCELLED
   NO_SHOW
@@ -32,7 +33,13 @@ enum AppointmentStatus {
 enum PaymentStatus {
   UNPAID
   PAID
+  PARTIAL
   REFUNDED
+}
+
+enum ServiceKind {
+  SERVICE
+  ADDON
 }
 
 enum OrderStatus {
@@ -77,7 +84,7 @@ model SalonProfile {
   address                 String
   brandColor              String  @default("#7A1F2B")
   accentColor             String  @default("#C4A484")
-  timezone                String  @default("America/Chicago")
+  timezone                String  @default("America/New_York")
   cancellationWindowHours Int     @default(2)
   photoConsentRequired    Boolean @default(true)
 
@@ -97,6 +104,8 @@ model SalonProfile {
   pushSubs     PushSubscription[]
   locations    Location[]
   assignments  StaffAssignment[]
+  shifts       Shift[]
+  audits       AuditEvent[]
 }
 
 model Location {
@@ -129,6 +138,7 @@ model Location {
   orders       Order[]
   staff        StaffAssignment[]
   recentClients Client[]
+  shifts       Shift[]
 
   @@unique([tenantId, slug])
   @@unique([tenantId, subdomain])
@@ -188,6 +198,7 @@ model Service {
   tenantId     String
   salon        SalonProfile  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
   category     String
+  kind         ServiceKind   @default(SERVICE)
   name         String
   description  String
   durationMin  Int
@@ -196,6 +207,7 @@ model Service {
   active       Boolean       @default(true)
   sortOrder    Int           @default(0)
   appointments Appointment[]
+  lines        AppointmentLine[]
   photos       ServicePhoto[]
   locations    ServiceLocation[]
 
@@ -271,6 +283,8 @@ model Technician {
   user         User?
   appointments Appointment[]
   locations    TechnicianLocation[]
+  shifts       Shift[]
+  favorites    ClientFavorite[]
 
   @@index([tenantId, active])
 }
@@ -304,6 +318,7 @@ model Client {
   appointments      Appointment[]
   orders            Order[]
   photos            ServicePhoto[]
+  favorites         ClientFavorite[]
 
   @@index([tenantId, email])
 }
@@ -327,6 +342,7 @@ model Appointment {
   notes          String?
   reminderSentAt DateTime?
   createdAt      DateTime          @default(now())
+  lines          AppointmentLine[]
   orders         Order[]
   photos         ServicePhoto[]
 
@@ -348,9 +364,13 @@ model Order {
   client        Client?       @relation(fields: [clientId], references: [id])
   status        OrderStatus   @default(PAID)
   paymentMethod PaymentMethod
+  subtotalCents Int           @default(0)
+  discountCents Int           @default(0)
+  tipCents      Int           @default(0)
   totalCents    Int
   createdAt     DateTime      @default(now())
   items         OrderItem[]
+  refunds       Refund[]
 
   @@index([tenantId, createdAt])
 }
@@ -365,6 +385,79 @@ model OrderItem {
   unitCents Int
   kind      String
   photos    ServicePhoto[]
+}
+
+model ClientFavorite {
+  id           String     @id @default(cuid())
+  tenantId     String
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([clientId, technicianId])
+  @@index([tenantId, clientId])
+}
+
+model AppointmentLine {
+  id            String      @id @default(cuid())
+  tenantId      String
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceId     String
+  service       Service     @relation(fields: [serviceId], references: [id])
+  name          String
+  kind          ServiceKind
+  priceCents    Int
+  durationMin   Int
+  sortOrder     Int         @default(0)
+
+  @@index([tenantId, appointmentId])
+}
+
+model Shift {
+  id           String     @id @default(cuid())
+  tenantId     String
+  salon        SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  locationId   String
+  location     Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int
+  startMin     Int
+  endMin       Int
+  active       Boolean    @default(true)
+
+  @@unique([technicianId, locationId, dayOfWeek])
+  @@index([tenantId, locationId, dayOfWeek])
+}
+
+model Refund {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountCents Int
+  reason      String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model AuditEvent {
+  id         String       @id @default(cuid())
+  tenantId   String
+  salon      SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  summary    String
+  createdAt  DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
 }
 
 model SmsMessage {

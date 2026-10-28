@@ -2,7 +2,8 @@
 
 import { bookAppointment, loadAlternates, loadSlots } from "@/app/book/actions";
 import { buttonClass } from "@/components/ui";
-import { formatCents, type AlternateLocation } from "@redlady/core";
+import { FavoriteToggle, favoriteCardClass } from "@/components/favorite-mark";
+import { formatCents, sortByFavorite, type AlternateLocation } from "@redlady/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -61,6 +62,8 @@ export function BookingWizard({
   presetLocationSlug,
   suggestNearest,
   guest,
+  favoriteIds,
+  signedIn,
 }: {
   services: ServiceChoice[];
   technicians: TechChoice[];
@@ -72,6 +75,8 @@ export function BookingWizard({
   presetLocationSlug: string;
   suggestNearest: boolean;
   guest: { name: string; phone: string; email: string } | null;
+  favoriteIds: string[];
+  signedIn: boolean;
 }) {
   const router = useRouter();
   const preset = services.find((service) => service.id === presetServiceId) ?? null;
@@ -96,6 +101,8 @@ export function BookingWizard({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<{ when: string; service: string; technician: string; location: string } | null>(null);
+  const [pendingAlternate, setPendingAlternate] = useState<{ locationSlug: string; locationName: string; technicianId: string; technicianName: string; startIso: string; label: string } | null>(null);
+  const orderedTechs = sortByFavorite(visibleTechs, favoriteIds);
 
   useEffect(() => {
     if (!service || !location) return;
@@ -167,7 +174,9 @@ export function BookingWizard({
         <p className="text-bark">
           {done.location} · {done.when}
         </p>
-        <p className="mt-4 text-sm text-bark">A confirmation was handed to the SMS driver. Sign in to see or cancel the visit.</p>
+        <p className="mt-4 text-sm text-bark">
+          A confirmation was handed to the SMS driver. <a className="underline" href="/login">Sign in</a> or <a className="underline" href="/signup">create an account</a> to see or cancel the visit.
+        </p>
       </section>
     );
   }
@@ -218,18 +227,21 @@ export function BookingWizard({
       <aside className="h-fit space-y-4 rounded-[2rem] bg-white p-5 shadow-card lg:sticky lg:top-24">
         <h2 className="font-serif text-3xl italic">Technician</h2>
         <div className="grid grid-cols-2 gap-2">
-          {visibleTechs.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setTechnician(item)}
-              className={`rounded-2xl border p-3 text-left ${technician?.id === item.id ? "border-ink" : "border-line"}`}
-            >
-              {item.avatarUrl ? <img src={item.avatarUrl} alt="" className="mb-2 h-16 w-16 rounded-full object-cover" /> : null}
-              <span className="block text-sm font-medium">{item.name}</span>
-              <span className="block text-xs text-bark">{item.roleTitle}</span>
-            </button>
-          ))}
+          {orderedTechs.map((item) => {
+            const favorite = favoriteIds.includes(item.id);
+            return (
+              <div key={item.id} className={`rounded-2xl p-3 text-left ${favoriteCardClass(favorite)} ${technician?.id === item.id ? "ring-2 ring-ink" : ""}`}>
+                <span className="flex items-start justify-between gap-1">
+                  <button type="button" onClick={() => setTechnician(item)} className="min-w-0 flex-1 text-left">
+                    {item.avatarUrl ? <img src={item.avatarUrl} alt="" className="mb-2 h-16 w-16 rounded-full object-cover" /> : null}
+                    <span className="block text-sm font-medium">{item.name}</span>
+                    <span className="block text-xs text-bark">{item.roleTitle}</span>
+                  </button>
+                  {signedIn ? <FavoriteToggle technicianId={item.id} name={item.name} active={favorite} /> : null}
+                </span>
+              </div>
+            );
+          })}
         </div>
         <label className="block text-sm">
           <span className="mb-1 block text-bark">Date</span>
@@ -262,18 +274,15 @@ export function BookingWizard({
                         className={buttonClass("ghost", "px-3 py-2")}
                         onClick={() => {
                           const nextLocation = locations.find((item) => item.id === alternate.locationId);
-                          const nextTech = technicians.find((item) => item.id === slot.technicianId) ?? null;
-                          if (nextLocation) setLocationSlug(nextLocation.slug);
-                          setTechnician(nextTech);
-                          setStartIso(slot.startIso);
-                          if (name.trim().length >= 2 && phone.trim().length >= 7 && nextLocation) {
-                            void submit({
-                              locationSlug: nextLocation.slug,
-                              technicianId: slot.technicianId,
-                              startIso: slot.startIso,
-                              technicianName: slot.technicianName,
-                            });
-                          }
+                          if (!nextLocation) return;
+                          setPendingAlternate({
+                            locationSlug: nextLocation.slug,
+                            locationName: nextLocation.name,
+                            technicianId: slot.technicianId,
+                            technicianName: slot.technicianName,
+                            startIso: slot.startIso,
+                            label: slot.label,
+                          });
                         }}
                       >
                         {slot.label} · {slot.technicianName}
@@ -282,6 +291,17 @@ export function BookingWizard({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        ) : null}
+        {pendingAlternate ? (
+          <div className="rounded-2xl border-2 border-gold bg-cream p-3 text-sm">
+            <p>
+              Book {service?.name} at {pendingAlternate.locationName} with {pendingAlternate.technicianName} at {pendingAlternate.label}?
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button type="button" className={buttonClass("solid")} onClick={() => void submit(pendingAlternate)}>Confirm booking</button>
+              <button type="button" className={buttonClass("ghost")} onClick={() => setPendingAlternate(null)}>Back</button>
             </div>
           </div>
         ) : null}

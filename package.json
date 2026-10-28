@@ -11,7 +11,7 @@
     "start": "node scripts/with-env.mjs pnpm --filter web start",
     "lint": "pnpm --filter web lint",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm --filter @redlady/core test && pnpm --filter @redlady/db test",
+    "test": "pnpm --filter @redlady/core test && pnpm --filter @redlady/db test && pnpm --filter web test",
     "db:generate": "node scripts/with-env.mjs pnpm --filter @redlady/db generate",
     "db:deploy": "node scripts/with-env.mjs pnpm --filter @redlady/db run migrate:deploy",
     "db:seed": "node scripts/with-env.mjs pnpm --filter @redlady/db seed",

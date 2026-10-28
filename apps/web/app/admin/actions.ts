@@ -18,7 +18,7 @@ export async function saveLocation(formData: FormData) {
     name: String(formData.get("name") ?? "").trim(),
     address: String(formData.get("address") ?? "").trim(),
     phone: String(formData.get("phone") ?? "").trim(),
-    timezone: String(formData.get("timezone") ?? "America/Chicago").trim(),
+    timezone: String(formData.get("timezone") ?? "America/New_York").trim(),
     brandColor: String(formData.get("brandColor") ?? "").trim() || null,
     tagline: String(formData.get("tagline") ?? "").trim() || null,
     subdomain: String(formData.get("subdomain") ?? "").trim() || null,
@@ -96,24 +96,25 @@ export async function saveHours(formData: FormData) {
 }
 
 export async function saveOffer(formData: FormData) {
-  const user = await requireRoles(["OWNER"]);
+  const user = await requireRoles(["OWNER", "MANAGER", "FRONT_DESK"]);
   if (!user.db || !user.tenantId) redirect("/login");
   const serviceId = String(formData.get("serviceId") ?? "");
   const locationId = String(formData.get("locationId") ?? "");
+  try {
+    assertLocation(user, locationId);
+  } catch {
+    redirect("/admin?tab=catalog&error=That+studio+is+outside+your+access.");
+  }
   const available = formData.get("available") === "on";
   const price = String(formData.get("price") ?? "").trim();
   const duration = String(formData.get("duration") ?? "").trim();
+  const existing = await user.db.serviceLocation.findUnique({ where: { serviceId_locationId: { serviceId, locationId } } });
+  const priceCents = price ? Math.round(Number(price) * 100) : existing?.priceCents ?? null;
+  const durationMin = duration ? Number(duration) : existing?.durationMin ?? null;
   await user.db.serviceLocation.upsert({
     where: { serviceId_locationId: { serviceId, locationId } },
-    update: { available, priceCents: price ? Math.round(Number(price) * 100) : null, durationMin: duration ? Number(duration) : null },
-    create: {
-      tenantId: user.tenantId,
-      serviceId,
-      locationId,
-      available,
-      priceCents: price ? Math.round(Number(price) * 100) : null,
-      durationMin: duration ? Number(duration) : null,
-    },
+    update: { available, priceCents, durationMin },
+    create: { tenantId: user.tenantId, serviceId, locationId, available, priceCents, durationMin },
   });
   revalidatePath("/admin");
   redirect("/admin?tab=catalog&saved=1");

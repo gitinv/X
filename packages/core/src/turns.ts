@@ -1,4 +1,4 @@
-export type TurnStatus = "BOOKED" | "CHECKED_IN" | "IN_SERVICE" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+export type TurnStatus = "BOOKED" | "CHECKED_IN" | "IN_SERVICE" | "READY" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
 
 export interface TurnVisit {
   id: string;
@@ -21,9 +21,10 @@ const STATUS_RANK: Record<TurnStatus, number> = {
   IN_SERVICE: 0,
   CHECKED_IN: 1,
   BOOKED: 2,
-  COMPLETED: 3,
-  CANCELLED: 4,
-  NO_SHOW: 5,
+  READY: 3,
+  COMPLETED: 4,
+  CANCELLED: 5,
+  NO_SHOW: 6,
 };
 
 export function buildTurnBoard(visits: TurnVisit[]): TurnBoard {

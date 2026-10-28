@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { InventoryError, assertSameTenant, canAccessLocation, canViewServicePhoto } from "@redlady/core";
 import { getTenantClient, platform, urlForDatabase } from "./clients";
 import { createPhysicalDatabase, migrateTenantUrl } from "./provision";
+import { cancelVisit, refundTicket, registerCustomer, saveVisitTicket, toggleFavorite } from "./desk";
 import { BookingConflictError, commitCheckout, createBooking, sendDueReminders } from "./salon";
 
 const stamp = `${Date.now().toString(36)}${Math.random().toString(16).slice(2, 6)}`;
@@ -204,6 +205,60 @@ describe("salon database rules", () => {
     expect(first).toEqual([appointment.id]);
     expect(second).toEqual([]);
     expect(messages).toHaveLength(1);
+  });
+
+  it("covers ticket, favorite, signup, cancel, and refund routes", async () => {
+    const salon = await makeSalon("routes");
+    const addon = await salon.db.service.create({
+      data: { tenantId: salon.tenant.id, category: "Add", kind: "ADDON", name: "Paraffin", description: "warm", durationMin: 15, priceCents: 1200, supplies: [] },
+    });
+    const visit = await saveVisitTicket(salon.db, {
+      tenantId: salon.tenant.id,
+      actorId: "desk",
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceIds: [salon.service.id, addon.id],
+      startAt: new Date("2026-09-01T15:00:00Z"),
+    });
+    const lines = await salon.db.appointmentLine.findMany({ where: { appointmentId: visit.id } });
+    expect(lines).toHaveLength(2);
+    expect(lines.reduce((sum, line) => sum + line.priceCents, 0)).toBe(5700);
+    expect(await toggleFavorite(salon.db, { tenantId: salon.tenant.id, clientId: salon.client.id, technicianId: salon.technician.id })).toEqual({ favorite: true });
+    expect(await toggleFavorite(salon.db, { tenantId: salon.tenant.id, clientId: salon.client.id, technicianId: salon.technician.id })).toEqual({ favorite: false });
+    await expect(cancelVisit(salon.db, { tenantId: salon.tenant.id, actorId: "desk", appointmentId: visit.id, confirm: false })).rejects.toThrow(/confirm/i);
+    await cancelVisit(salon.db, { tenantId: salon.tenant.id, actorId: "desk", appointmentId: visit.id, confirm: true });
+    const audits = await salon.db.auditEvent.findMany({ where: { tenantId: salon.tenant.id, action: "APPOINTMENT_CANCEL" } });
+    expect(audits).toHaveLength(1);
+    const paid = await createBooking(salon.db, {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceId: salon.service.id,
+      startAt: new Date("2026-09-02T15:00:00Z"),
+      endAt: new Date("2026-09-02T15:45:00Z"),
+    });
+    const order = await commitCheckout(salon.db, {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      appointmentId: paid.id,
+      paymentMethod: "CARD",
+      products: [],
+      tipCents: 500,
+    });
+    expect(order.totalCents).toBe(5000);
+    const refund = await refundTicket(salon.db, { tenantId: salon.tenant.id, actorId: "desk", orderId: order.id, amountCents: 2000, reason: "Guest left early" });
+    expect(refund.amountCents).toBe(2000);
+    const signed = await registerCustomer(salon.db, {
+      tenantId: salon.tenant.id,
+      name: "Ava",
+      email: "",
+      phone: "555-0199",
+      passwordHash: "hash",
+    });
+    expect(signed.client.id).toBe(salon.client.id);
+    expect(signed.user.role).toBe("CUSTOMER");
   });
 });
 

@@ -3,7 +3,9 @@ import { CustomerFrame } from "@/components/customer-frame";
 import { Notice, buttonClass } from "@/components/ui";
 import { requireUser } from "@/lib/auth/session";
 import { createDownloadUrl } from "@/lib/photos/storage";
-import { canViewServicePhoto, formatWhen } from "@redlady/core";
+import { FavoriteToggle } from "@/components/favorite-mark";
+import { PhotoThumb } from "@/components/photo-thumb";
+import { canViewServicePhoto, favoriteNote, formatWhen } from "@redlady/core";
 import Link from "next/link";
 
 export const metadata = { title: "Your visits" };
@@ -21,7 +23,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     user.clientId && user.db && user.tenantId
       ? await user.db.appointment.findMany({
           where: { tenantId: user.tenantId, clientId: user.clientId },
-          include: { service: true, technician: true, location: true, photos: true },
+          include: { service: true, technician: true, location: true, photos: true, client: { include: { favorites: true } } },
           orderBy: { startAt: "desc" },
         })
       : [];
@@ -72,14 +74,19 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
             return (
               <li key={visit.id} className="rounded-3xl bg-white p-4 shadow-card">
                 <p className="font-medium">{visit.service.name}</p>
-                <p className="text-sm text-bark">
-                  {formatWhen(visit.startAt, visit.location.timezone)} · {visit.technician.name} · {visit.location.name}
+                <p className="flex items-center gap-1 text-sm text-bark">
+                  {formatWhen(visit.startAt, visit.location.timezone)} · {visit.technician.name}
+                  <FavoriteToggle technicianId={visit.technicianId} name={visit.technician.name} active={visit.client.favorites.some((favorite) => favorite.technicianId === visit.technicianId)} />
+                  · {visit.location.name}
                 </p>
+                {favoriteNote(visit.client.name, visit.client.favorites.some((favorite) => favorite.technicianId === visit.technicianId) ? [visit.technician.name] : []) ? (
+                  <p className="text-sm"><span className="text-gold">★</span> {favoriteNote(visit.client.name, [visit.technician.name])}</p>
+                ) : null}
                 <p className="mt-1 text-xs uppercase tracking-[0.14em] text-bark">{visit.status.replaceAll("_", " ")}</p>
                 {thumbs.length > 0 ? (
                   <div className="mt-3 flex gap-2 overflow-x-auto">
                     {thumbs.map((photo) => (
-                      <img key={photo.id} src={photo.src} alt={photo.label.toLowerCase()} className="h-24 w-24 rounded-2xl object-cover" />
+                      <PhotoThumb key={photo.id} src={photo.src} alt={photo.label.toLowerCase()} className="h-24 w-24 rounded-2xl object-cover" />
                     ))}
                   </div>
                 ) : null}

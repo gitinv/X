@@ -165,7 +165,7 @@ export async function provisionTenant(input: {
       name: input.name,
       address: "",
       phone: "",
-      timezone: "America/Chicago",
+      timezone: "America/New_York",
     },
   });
   await db.businessHour.createMany({

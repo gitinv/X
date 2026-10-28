@@ -10,6 +10,7 @@ import { clearTenantDatabase } from "../src/salon";
 
 const services: {
   category: string;
+  kind?: "SERVICE" | "ADDON";
   name: string;
   description: string;
   durationMin: number;
@@ -109,6 +110,7 @@ const services: {
   },
   {
     category: "Add Aura",
+    kind: "ADDON",
     name: "Gel Polish Change",
     description: "Soak-off and a fresh gel color.",
     durationMin: 25,
@@ -118,6 +120,7 @@ const services: {
   },
   {
     category: "Add Aura",
+    kind: "ADDON",
     name: "Paraffin Treatment",
     description: "Warm paraffin mittens or booties after a service.",
     durationMin: 15,
@@ -278,68 +281,88 @@ async function main() {
       name: "The Red Lady Spa",
       tagline: "Sculpting luxury at your fingertips",
       about:
-        "Medical-grade Russian manicures, hand-painted gel, and restorative paraffin care. Two Chicago studios share one client book. The address and hours are sample content — change them in the owner portal.",
-      phone: "(312) 555-0148",
+        "Medical-grade Russian manicures, hand-painted gel, and restorative paraffin care. Studios in Chantilly, Fairfax, and Reston share one client book. The address and hours are sample content — change them in the owner portal.",
+      phone: "(703) 555-0148",
       email: "hello@redladyspa.com",
-      address: "18 East Oak Street, Chicago, IL",
+      address: "100 Demo Plaza, Chantilly, VA 20151",
       brandColor: "#7A1F2B",
       accentColor: "#C4A484",
-      timezone: "America/Chicago",
+      timezone: "America/New_York",
       cancellationWindowHours: 2,
       photoConsentRequired: true,
     },
   });
-  const oak = await db.location.create({
+  const chantilly = await db.location.create({
     data: {
       tenantId,
-      slug: "oak-street",
-      name: "Oak Street",
-      address: "18 East Oak Street, Chicago, IL",
-      phone: "(312) 555-0148",
-      email: "oak@redladyspa.com",
-      timezone: "America/Chicago",
-      latitude: 41.9004,
-      longitude: -87.6244,
-      subdomain: "oak",
+      slug: "chantilly",
+      name: "Chantilly",
+      address: "100 Demo Plaza, Chantilly, VA 20151",
+      phone: "(703) 555-0148",
+      email: "chantilly@redladyspa.com",
+      timezone: "America/New_York",
+      latitude: 38.8943,
+      longitude: -77.4311,
+      subdomain: "chantilly",
       sortOrder: 1,
     },
   });
-  const lincoln = await db.location.create({
+  const fairfax = await db.location.create({
     data: {
       tenantId,
-      slug: "lincoln-park",
-      name: "Lincoln Park",
-      address: "2300 N Lincoln Avenue, Chicago, IL",
-      phone: "(312) 555-0190",
-      email: "lincoln@redladyspa.com",
-      timezone: "America/Chicago",
-      latitude: 41.9234,
-      longitude: -87.6493,
-      subdomain: "lincoln",
+      slug: "fairfax",
+      name: "Fairfax",
+      address: "250 Demo Plaza, Fairfax, VA 22030",
+      phone: "(703) 555-0162",
+      email: "fairfax@redladyspa.com",
+      timezone: "America/New_York",
+      latitude: 38.8462,
+      longitude: -77.3064,
+      subdomain: "fairfax",
       sortOrder: 2,
+    },
+  });
+  const reston = await db.location.create({
+    data: {
+      tenantId,
+      slug: "reston",
+      name: "Reston",
+      address: "1800 Demo Plaza, Reston, VA 20190",
+      phone: "(703) 555-0174",
+      email: "reston@redladyspa.com",
+      timezone: "America/New_York",
+      latitude: 38.9586,
+      longitude: -77.357,
+      subdomain: "reston",
+      sortOrder: 3,
     },
   });
   await db.businessHour.createMany({
     data: [
-      ...weekHours(tenantId, oak.id, { closed: false, openMin: 10 * 60, closeMin: 17 * 60 }, { openMin: 9 * 60, closeMin: 19 * 60 }),
-      ...weekHours(tenantId, lincoln.id, { closed: true, openMin: 10 * 60, closeMin: 17 * 60 }, { openMin: 10 * 60, closeMin: 19 * 60 }),
+      ...weekHours(tenantId, chantilly.id, { closed: false, openMin: 10 * 60, closeMin: 17 * 60 }, { openMin: 9 * 60, closeMin: 19 * 60 }),
+      ...weekHours(tenantId, fairfax.id, { closed: true, openMin: 10 * 60, closeMin: 17 * 60 }, { openMin: 10 * 60, closeMin: 19 * 60 }),
+      ...weekHours(tenantId, reston.id, { closed: false, openMin: 10 * 60, closeMin: 16 * 60 }, { openMin: 10 * 60, closeMin: 19 * 60 }),
     ],
   });
   await db.register.createMany({
     data: [
-      { tenantId, locationId: oak.id, name: "Oak front desk" },
-      { tenantId, locationId: lincoln.id, name: "Lincoln front desk" },
+      { tenantId, locationId: chantilly.id, name: "Chantilly front desk" },
+      { tenantId, locationId: fairfax.id, name: "Fairfax front desk" },
+      { tenantId, locationId: reston.id, name: "Reston front desk" },
     ],
   });
-  await db.service.createMany({ data: services.map((service) => ({ ...service, tenantId })) });
+  await db.service.createMany({ data: services.map((service) => ({ ...service, kind: service.kind ?? "SERVICE", tenantId })) });
   const menu = await db.service.findMany({ where: { tenantId } });
   const byName = (name: string) => menu.find((service) => service.name === name)!;
   const gel = byName("Gel (Shellac) Manicure");
   await db.serviceLocation.create({
-    data: { tenantId, serviceId: gel.id, locationId: lincoln.id, available: true, priceCents: 5000, durationMin: 50 },
+    data: { tenantId, serviceId: gel.id, locationId: fairfax.id, available: true, priceCents: 5000, durationMin: 50 },
   });
   await db.serviceLocation.create({
-    data: { tenantId, serviceId: byName("Midnight Velvet Spark").id, locationId: lincoln.id, available: false },
+    data: { tenantId, serviceId: byName("Midnight Velvet Spark").id, locationId: fairfax.id, available: false },
+  });
+  await db.serviceLocation.create({
+    data: { tenantId, serviceId: byName("Midnight Velvet Spark").id, locationId: reston.id, available: false },
   });
   for (const product of products) {
     const created = await db.product.create({
@@ -354,12 +377,19 @@ async function main() {
     });
     await db.locationStock.createMany({
       data: [
-        { tenantId, locationId: oak.id, productId: created.id, stock: product.stock, lowStockAlert: product.lowStockAlert },
+        { tenantId, locationId: chantilly.id, productId: created.id, stock: product.stock, lowStockAlert: product.lowStockAlert },
         {
           tenantId,
-          locationId: lincoln.id,
+          locationId: fairfax.id,
           productId: created.id,
           stock: Math.max(1, Math.floor(product.stock / 2)),
+          lowStockAlert: product.lowStockAlert,
+        },
+        {
+          tenantId,
+          locationId: reston.id,
+          productId: created.id,
+          stock: Math.max(1, Math.floor(product.stock / 3)),
           lowStockAlert: product.lowStockAlert,
         },
       ],
@@ -407,12 +437,14 @@ async function main() {
   });
   await db.technicianLocation.createMany({
     data: [
-      { tenantId, technicianId: chloe.id, locationId: oak.id },
-      { tenantId, technicianId: chloe.id, locationId: lincoln.id },
-      { tenantId, technicianId: sophia.id, locationId: oak.id },
-      { tenantId, technicianId: marcus.id, locationId: lincoln.id },
-      { tenantId, technicianId: yuki.id, locationId: oak.id },
-      { tenantId, technicianId: yuki.id, locationId: lincoln.id },
+      { tenantId, technicianId: chloe.id, locationId: chantilly.id },
+      { tenantId, technicianId: chloe.id, locationId: fairfax.id },
+      { tenantId, technicianId: sophia.id, locationId: chantilly.id },
+      { tenantId, technicianId: marcus.id, locationId: fairfax.id },
+      { tenantId, technicianId: yuki.id, locationId: chantilly.id },
+      { tenantId, technicianId: yuki.id, locationId: fairfax.id },
+      { tenantId, technicianId: yuki.id, locationId: reston.id },
+      { tenantId, technicianId: marcus.id, locationId: reston.id },
     ],
   });
   const eleanor = await db.client.create({
@@ -423,7 +455,7 @@ async function main() {
       email: "eleanor@example.com",
       notes: "Prefers round tips and deep green.",
       photoConsentAt: new Date(),
-      lastLocationId: oak.id,
+      lastLocationId: chantilly.id,
     },
   });
   const gemma = await db.client.create({
@@ -433,32 +465,32 @@ async function main() {
       phone: "415-555-0199",
       email: "gemma.ward@example.com",
       notes: "Delicate cuticles. Japanese gels only. Has not agreed to service photos.",
-      lastLocationId: oak.id,
+      lastLocationId: chantilly.id,
     },
   });
   const ava = await db.client.create({
     data: {
       tenantId,
       name: "Ava Chen",
-      phone: "312-555-0177",
+      phone: "703-555-0177",
       email: "ava@redladyspa.com",
       notes: "Demo customer login.",
       photoConsentAt: new Date(),
-      lastLocationId: oak.id,
+      lastLocationId: chantilly.id,
     },
   });
   const noah = await db.client.create({
-    data: { tenantId, name: "Noah Blake", phone: "312-555-0160", email: "noah@example.com", lastLocationId: lincoln.id },
+    data: { tenantId, name: "Noah Blake", phone: "703-555-0160", email: "noah@example.com", lastLocationId: fairfax.id },
   });
   const priya = await db.client.create({
-    data: { tenantId, name: "Priya Shah", phone: "312-555-0188", email: "priya@example.com", photoConsentAt: new Date(), lastLocationId: lincoln.id },
+    data: { tenantId, name: "Priya Shah", phone: "703-555-0188", email: "priya@example.com", photoConsentAt: new Date(), lastLocationId: fairfax.id },
   });
   const avaUser = await db.user.create({
     data: {
       email: "ava@redladyspa.com",
       name: "Ava Chen",
       role: "CUSTOMER",
-      phone: "312-555-0177",
+      phone: "703-555-0177",
       passwordHash: await password("Demo-Customer-2026"),
       tenantId,
       clientId: ava.id,
@@ -474,8 +506,8 @@ async function main() {
       technicianId: chloe.id,
       assignments: {
         create: [
-          { tenantId, locationId: oak.id, role: "TECHNICIAN" },
-          { tenantId, locationId: lincoln.id, role: "TECHNICIAN" },
+          { tenantId, locationId: chantilly.id, role: "TECHNICIAN" },
+          { tenantId, locationId: fairfax.id, role: "TECHNICIAN" },
         ],
       },
     },
@@ -489,8 +521,9 @@ async function main() {
       tenantId,
       assignments: {
         create: [
-          { tenantId, locationId: oak.id, role: "FRONT_DESK" },
-          { tenantId, locationId: lincoln.id, role: "FRONT_DESK" },
+          { tenantId, locationId: chantilly.id, role: "FRONT_DESK" },
+          { tenantId, locationId: fairfax.id, role: "FRONT_DESK" },
+          { tenantId, locationId: reston.id, role: "FRONT_DESK" },
         ],
       },
     },
@@ -502,7 +535,7 @@ async function main() {
       role: "MANAGER",
       passwordHash: await password("Demo-Manager-2026"),
       tenantId,
-      assignments: { create: [{ tenantId, locationId: oak.id, role: "MANAGER" }] },
+      assignments: { create: [{ tenantId, locationId: chantilly.id, role: "MANAGER" }] },
     },
   });
   await db.user.create({
@@ -523,7 +556,7 @@ async function main() {
   const past = await db.appointment.create({
     data: {
       tenantId,
-      locationId: oak.id,
+      locationId: chantilly.id,
       clientId: ava.id,
       technicianId: chloe.id,
       serviceId: classic.id,
@@ -536,7 +569,7 @@ async function main() {
   const velvetVisit = await db.appointment.create({
     data: {
       tenantId,
-      locationId: oak.id,
+      locationId: chantilly.id,
       clientId: eleanor.id,
       technicianId: yuki.id,
       serviceId: velvet.id,
@@ -550,7 +583,7 @@ async function main() {
     data: [
       {
         tenantId,
-        locationId: oak.id,
+        locationId: chantilly.id,
         clientId: eleanor.id,
         technicianId: chloe.id,
         serviceId: gel.id,
@@ -561,7 +594,7 @@ async function main() {
       },
       {
         tenantId,
-        locationId: oak.id,
+        locationId: chantilly.id,
         clientId: gemma.id,
         technicianId: sophia.id,
         serviceId: lavender.id,
@@ -572,7 +605,7 @@ async function main() {
       },
       {
         tenantId,
-        locationId: lincoln.id,
+        locationId: fairfax.id,
         clientId: noah.id,
         technicianId: marcus.id,
         serviceId: dip.id,
@@ -584,7 +617,7 @@ async function main() {
       },
       {
         tenantId,
-        locationId: oak.id,
+        locationId: chantilly.id,
         clientId: ava.id,
         technicianId: chloe.id,
         serviceId: classic.id,
@@ -595,7 +628,7 @@ async function main() {
       },
       {
         tenantId,
-        locationId: lincoln.id,
+        locationId: fairfax.id,
         clientId: priya.id,
         technicianId: yuki.id,
         serviceId: change.id,
@@ -609,7 +642,7 @@ async function main() {
   await db.order.create({
     data: {
       tenantId,
-      locationId: oak.id,
+      locationId: chantilly.id,
       appointmentId: velvetVisit.id,
       clientId: eleanor.id,
       status: "PAID",
@@ -683,8 +716,8 @@ async function main() {
   await db.smsMessage.create({
     data: {
       tenantId,
-      to: "312-555-0177",
-      body: "The Red Lady Spa (Oak Street): Ava, you are booked for The Red Lady Classic Manicure tomorrow. This is a sample message from the console SMS driver.",
+      to: "703-555-0177",
+      body: "The Red Lady Spa (Chantilly): Ava, you are booked for The Red Lady Classic Manicure tomorrow. This is a sample message from the console SMS driver.",
       status: "SENT",
       provider: "console",
       providerId: "seed-console",
@@ -750,7 +783,36 @@ async function main() {
     },
   });
 
-  console.log("Seeded The Red Lady Spa (Oak Street and Lincoln Park) and Lumen Nails.");
+  const booked = await db.appointment.findMany({ where: { tenantId }, include: { service: true } });
+  await db.appointmentLine.createMany({
+    data: booked.map((visit) => ({
+      tenantId,
+      appointmentId: visit.id,
+      serviceId: visit.serviceId,
+      name: visit.service.name,
+      kind: visit.service.kind,
+      priceCents: visit.locationId === fairfax.id && visit.serviceId === gel.id ? 5000 : visit.service.priceCents,
+      durationMin: visit.locationId === fairfax.id && visit.serviceId === gel.id ? 50 : visit.service.durationMin,
+    })),
+  });
+  await db.clientFavorite.create({ data: { tenantId, clientId: ava.id, technicianId: chloe.id } });
+  const techStudios = await db.technicianLocation.findMany({ where: { tenantId } });
+  const studioHours = await db.businessHour.findMany({ where: { tenantId } });
+  await db.shift.createMany({
+    data: techStudios.flatMap((row) =>
+      studioHours
+        .filter((hour) => hour.locationId === row.locationId && !hour.closed)
+        .map((hour) => ({
+          tenantId,
+          technicianId: row.technicianId,
+          locationId: row.locationId,
+          dayOfWeek: hour.dayOfWeek,
+          startMin: hour.openMin,
+          endMin: hour.closeMin,
+        })),
+    ),
+  });
+  console.log("Seeded The Red Lady Spa (Chantilly, Fairfax, and Reston) and Lumen Nails.");
   console.log("Demo passwords are listed in the README.");
 }
 

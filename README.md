@@ -26,14 +26,14 @@ Open http://localhost:3000.
 
 ## Demo logins
 
-These passwords are shown on the sign-in page only while `DEMO_HINTS=true` in `.env`. The production container turns that off.
+`DEMO_HINTS` defaults to off. Set it to `true` in a private demo if you want the sign-in page to list the sample customer and staff passwords. The platform admin is never listed there. The production container keeps `DEMO_HINTS` off. Staging can leave it on.
 
 | Who | Email | Password | Opens |
 | --- | --- | --- | --- |
 | Customer | ava@redladyspa.com | Demo-Customer-2026 | Home, booking, visit history |
 | Technician | chloe@redladyspa.com | Demo-Tech-2026 | Tech screen for both studios |
 | Front desk | desk@redladyspa.com | Demo-Desk-2026 | Front desk for both studios |
-| Oak Street manager | manager@redladyspa.com | Demo-Manager-2026 | Front desk and owner tools for Oak Street only |
+| Chantilly manager | manager@redladyspa.com | Demo-Manager-2026 | Front desk and owner tools for Chantilly only |
 | Owner | owner@redladyspa.com | Demo-Owner-2026 | Every location, plus the rollup |
 | Platform admin | platform@redladyspa.com | Demo-Platform-2026 | Salon list. This login is not inside a salon database |
 | Lumen owner | maya@lumennails.example | Demo-Lumen-2026 | The second sample salon |
@@ -55,7 +55,7 @@ Lumen Nails is a different business. Open it at http://lumen-nails.localhost:300
 | Owner portal | http://localhost:3000/admin |
 | Platform | http://localhost:3000/platform |
 
-Oak Street can also be opened as http://oak.red-lady-spa.localhost:3000 and Lincoln Park as http://lincoln.red-lady-spa.localhost:3000. Browsers treat `*.localhost` as this computer.
+Chantilly can also be opened as http://chantilly.red-lady-spa.localhost:3000, Fairfax as http://fairfax.red-lady-spa.localhost:3000, and Reston as http://reston.red-lady-spa.localhost:3000. Browsers treat `*.localhost` as this computer.
 
 ## Add the app to a phone
 
@@ -73,10 +73,11 @@ Sign in as the owner. The portal edits services, prices, products, technicians, 
 
 Red Lady starts with two studios:
 
-- **Oak Street** — 18 East Oak Street, Chicago. Monday–Saturday 9–7, Sunday 10–5.
-- **Lincoln Park** — 2300 N Lincoln Avenue. Monday–Saturday 10–7, Sunday closed. Gel manicures are $50 there. Midnight Velvet Spark is offered at Oak Street only.
+- **Chantilly** — 100 Demo Plaza, Chantilly, VA 20151. Monday–Saturday 9–7, Sunday 10–5. America/New_York.
+- **Fairfax** — 250 Demo Plaza, Fairfax, VA 22030. Monday–Saturday 10–7, Sunday closed. Gel manicures are $50 there.
+- **Reston** — 1800 Demo Plaza, Reston, VA 20190. Monday–Saturday 10–7, Sunday 10–4. Midnight Velvet Spark is offered at Chantilly only.
 
-A manager login only sees the studios you assign. The owner sees an **All locations** total for today's tickets. Customers are shared: Ava has one profile and can book either studio. Booking remembers the last studio. If that studio has no open chair, the page lists **Also available at other locations**, nearest first. **Book this again** on a past visit does the same when the original studio is full.
+The front desk builds a ticket from service and add-on tiles, adds a walk-in, and can reschedule or cancel with a confirmation. Checkout takes a tip, a percent or dollar discount, and a refund with a reason. Customers can create a login from the sign-in page, and mark favorite technicians with a gold star. Staff see that note, for example “Ava's favorite: Chloe,” and cannot change it. Reports cover a date range: sales, service mix, technician totals, and tips. A manager login only sees the studios you assign. The owner sees an **All locations** total and the location billing hook. Customers are shared: Ava has one profile and can book either studio. Booking remembers the last studio. If that studio has no open chair, the page lists **Also available at other locations**, nearest first. **Book this again** on a past visit does the same when the original studio is full.
 
 Service photos are taken from the tech screen or can be added at the desk. The camera button is first on a phone. On a TV, the turn list leads. A guest must agree to photos first (the check-in box) while that rule is on. The owner can turn the rule off under branding. Removing a photo hides it and writes an audit row. The file itself is kept for the retention period.
 
@@ -107,7 +108,7 @@ pnpm tenant:move river-nails "postgresql://USER:PASSWORD@other-host:5432/river_n
 
 `tenant:move` copies the data, checks the row counts, points the registry at the new database, and leaves the old database in place.
 
-A future phone app (Expo or Capacitor) can call the same JSON APIs. `POST /api/auth/login` with `{ "email", "password" }` returns a token. Send it as `Authorization: Bearer <token>`. The browser uses an httpOnly cookie. Useful routes: `GET /api/tech/board?location=oak-street`, `POST /api/bookings`, `POST /api/push/subscribe`, `GET /api/health`.
+A future phone app (Expo or Capacitor) can call the same JSON APIs. `POST /api/auth/login` with `{ "email", "password" }` returns a token. Send it as `Authorization: Bearer <token>`. The browser uses an httpOnly cookie. Useful routes: `GET /api/tech/board?location=chantilly`, `POST /api/bookings`, `POST /api/push/subscribe`, `GET /api/health`.
 
 `POST /api/push/subscribe` stores a Web Push subscription for appointment reminders. It answers `{ "accepted": true, "mode": "stub" }` until `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set. It does not send a push by itself.
 

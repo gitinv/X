@@ -1,4 +1,4 @@
-import { InventoryError, findBookingConflict, planInventoryDecrement, requireTenantId } from "@redlady/core";
+import { InventoryError, checkoutTotal, findBookingConflict, planInventoryDecrement, requireTenantId } from "@redlady/core";
 import { Prisma, type PaymentMethod, type PrismaClient } from "./generated/tenant";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -16,8 +16,13 @@ export class BookingConflictError extends Error {
 export async function clearTenantDatabase(db: PrismaClient) {
   await db.photoAudit.deleteMany();
   await db.servicePhoto.deleteMany();
+  await db.refund.deleteMany();
   await db.orderItem.deleteMany();
   await db.order.deleteMany();
+  await db.auditEvent.deleteMany();
+  await db.clientFavorite.deleteMany();
+  await db.appointmentLine.deleteMany();
+  await db.shift.deleteMany();
   await db.smsMessage.deleteMany();
   await db.pushSubscription.deleteMany();
   await db.appointment.deleteMany();
@@ -72,7 +77,12 @@ export async function createBooking(
   );
   if (conflict) throw new BookingConflictError(conflict.id);
 
-  return db.appointment.create({
+  const service = await db.service.findFirst({ where: { id: input.serviceId, tenantId } });
+  if (!service) throw new Error("That service is not on the menu.");
+  const override = await db.serviceLocation.findUnique({
+    where: { serviceId_locationId: { serviceId: service.id, locationId: input.locationId } },
+  });
+  const appointment = await db.appointment.create({
     data: {
       tenantId,
       locationId: input.locationId,
@@ -86,6 +96,18 @@ export async function createBooking(
       paymentStatus: "UNPAID",
     },
   });
+  await db.appointmentLine.create({
+    data: {
+      tenantId,
+      appointmentId: appointment.id,
+      serviceId: service.id,
+      name: service.name,
+      kind: service.kind,
+      priceCents: override?.priceCents ?? service.priceCents,
+      durationMin: override?.durationMin ?? service.durationMin,
+    },
+  });
+  return appointment;
 }
 
 export async function commitCheckout(
@@ -98,6 +120,8 @@ export async function commitCheckout(
     clientId?: string;
     paymentMethod: PaymentMethod;
     products: { productId: string; quantity: number }[];
+    tipCents?: number;
+    discountCents?: number;
   },
 ) {
   const tenantId = requireTenantId(input.tenantId);
@@ -119,15 +143,22 @@ export async function commitCheckout(
       if (appointment.status === "CANCELLED") throw new Error("That visit was cancelled.");
       if (appointment.paymentStatus === "PAID") throw new Error("That visit is already paid.");
       clientId = appointment.clientId;
-      const override = await tx.serviceLocation.findUnique({
-        where: { serviceId_locationId: { serviceId: appointment.serviceId, locationId: appointment.locationId } },
-      });
-      items.push({
-        kind: "SERVICE",
-        name: appointment.service.name,
-        quantity: 1,
-        unitCents: override?.priceCents ?? appointment.service.priceCents,
-      });
+      const lines = await tx.appointmentLine.findMany({ where: { appointmentId: appointment.id }, orderBy: { sortOrder: "asc" } });
+      if (lines.length > 0) {
+        for (const line of lines) {
+          items.push({ kind: line.kind, name: line.name, quantity: 1, unitCents: line.priceCents });
+        }
+      } else {
+        const override = await tx.serviceLocation.findUnique({
+          where: { serviceId_locationId: { serviceId: appointment.serviceId, locationId: appointment.locationId } },
+        });
+        items.push({
+          kind: "SERVICE",
+          name: appointment.service.name,
+          quantity: 1,
+          unitCents: override?.priceCents ?? appointment.service.priceCents,
+        });
+      }
     }
 
     const productIds = [...new Set(input.products.map((line) => line.productId))];
@@ -170,7 +201,8 @@ export async function commitCheckout(
       });
     }
 
-    const totalCents = items.reduce((sum, item) => sum + item.unitCents * item.quantity, 0);
+    const subtotalCents = items.reduce((sum, item) => sum + item.unitCents * item.quantity, 0);
+    const priced = checkoutTotal({ subtotalCents, discountCents: input.discountCents ?? 0, tipCents: input.tipCents ?? 0 });
     const order = await tx.order.create({
       data: {
         tenantId,
@@ -180,7 +212,10 @@ export async function commitCheckout(
         clientId,
         status: "PAID",
         paymentMethod: input.paymentMethod,
-        totalCents,
+        subtotalCents: priced.subtotalCents,
+        discountCents: priced.discountCents,
+        tipCents: priced.tipCents,
+        totalCents: priced.totalCents,
         items: {
           create: items.map((item) => ({
             kind: item.kind,

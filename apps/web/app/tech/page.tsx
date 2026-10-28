@@ -1,11 +1,12 @@
-import { setStaffLocation } from "@/app/pos/actions";
+import { setStaffLocation, updateVisit } from "@/app/pos/actions";
 import { LiveRefresh } from "@/components/live-refresh";
 import { PhotoCapture } from "@/components/photo-capture";
 import { StaffShell } from "@/components/shells";
+import { favoriteCardClass } from "@/components/favorite-mark";
 import { buttonClass } from "@/components/ui";
 import { requireRoles } from "@/lib/auth/session";
 import { staffScope } from "@/lib/staff-location";
-import { buildTurnBoard, canCaptureServicePhoto, formatWhen } from "@redlady/core";
+import { buildTurnBoard, canCaptureServicePhoto, favoriteNote, formatWhen } from "@redlady/core";
 
 export const metadata = { title: "Tech screen" };
 
@@ -26,14 +27,16 @@ export default async function TechPage() {
     where: {
       tenantId: user.tenantId,
       locationId: location.id,
-      status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE"] },
+      status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE", "READY"] },
       startAt: { lt: horizon },
     },
-    include: { client: true, service: true, technician: true },
+    include: { client: { include: { favorites: true } }, service: true, technician: true },
     orderBy: { startAt: "asc" },
   });
+  const activeVisits = visits.filter((visit) => visit.status !== "READY");
+  const readyVisits = visits.filter((visit) => visit.status === "READY");
   const board = buildTurnBoard(
-    visits.map((visit) => ({
+    activeVisits.map((visit) => ({
       id: visit.id,
       status: visit.status,
       start: visit.startAt,
@@ -93,6 +96,16 @@ export default async function TechPage() {
             <p className="text-xs uppercase tracking-[0.2em] text-gold">In the chair</p>
             <p className="mt-3 font-serif text-5xl italic leading-none lg:text-7xl">{board.current?.clientName ?? "Open chair"}</p>
             <p className="mt-4 text-lg">{board.current ? `${board.current.serviceName} · ${board.current.technicianName}` : "Waiting for the next guest"}</p>
+            {board.current ? (
+              <p className="mt-2 text-sm text-gold">
+                {favoriteNote(
+                  board.current.clientName,
+                  visits.find((visit) => visit.id === board.current?.id)?.client.favorites.some((favorite) => favorite.technicianId === visits.find((item) => item.id === board.current?.id)?.technicianId)
+                    ? [board.current.technicianName]
+                    : [],
+                )}
+              </p>
+            ) : null}
             {board.supplies.length > 0 ? <p className="mt-4 text-sm text-cream/80">Set out: {board.supplies.join(", ")}</p> : null}
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
@@ -113,6 +126,31 @@ export default async function TechPage() {
               </ul>
             </article>
           </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {activeVisits.map((visit) => {
+              const favorite = visit.client.favorites.some((item) => item.technicianId === visit.technicianId);
+              const note = favoriteNote(visit.client.name, favorite ? [visit.technician.name] : []);
+              return (
+                <form key={visit.id} action={updateVisit} className={`rounded-3xl p-4 ${favorite ? favoriteCardClass(true) : "bg-white shadow-card"}`}>
+                  <input type="hidden" name="id" value={visit.id} />
+                  <p className="font-medium">{visit.client.name}</p>
+                  <p className="text-sm text-bark">{visit.service.name} · {visit.technician.name}</p>
+                  {note ? <p className="mt-1 text-sm"><span className="text-gold">★</span> {note}</p> : null}
+                  <div className="mt-3 flex gap-2">
+                    {visit.status !== "IN_SERVICE" ? <button name="status" value="IN_SERVICE" className={buttonClass("solid")}>Start</button> : null}
+                    {visit.status === "IN_SERVICE" ? <button name="status" value="READY" className={buttonClass("solid")}>Finish</button> : null}
+                  </div>
+                </form>
+              );
+            })}
+          </div>
+          {readyVisits.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-sm">
+              {readyVisits.map((visit) => (
+                <li key={visit.id} className="rounded-2xl bg-white px-4 py-3">{visit.client.name} · finished and ready for checkout</li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       </div>
     </StaffShell>

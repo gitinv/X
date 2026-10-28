@@ -7,6 +7,8 @@ import { InventoryError, planInventoryDecrement } from "./inventory";
 import { dollarsToCents, formatClock, parseClock } from "./money";
 import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
+import { canEditFavorites, favoriteNote, sortByFavorite } from "./favorites";
+import { checkoutTotal, discountCents, refundDecision, slotWithinShifts, summarizeSales, ticketSummary } from "./ticket";
 import { listOpenSlots, zonedTimeToUtc } from "./time";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
@@ -187,16 +189,16 @@ describe("tenant isolation", () => {
 });
 
 describe("slots and money", () => {
-  it("converts Chicago wall time to UTC", () => {
-    expect(zonedTimeToUtc("2026-01-15", 9 * 60, "America/Chicago").toISOString()).toBe("2026-01-15T15:00:00.000Z");
-    expect(zonedTimeToUtc("2026-07-15", 9 * 60, "America/Chicago").toISOString()).toBe("2026-07-15T14:00:00.000Z");
+  it("converts New York wall time to UTC", () => {
+    expect(zonedTimeToUtc("2026-01-15", 9 * 60, "America/New_York").toISOString()).toBe("2026-01-15T14:00:00.000Z");
+    expect(zonedTimeToUtc("2026-07-15", 9 * 60, "America/New_York").toISOString()).toBe("2026-07-15T13:00:00.000Z");
   });
 
   it("hides closed days, past times, and busy chairs", () => {
     expect(
       listOpenSlots({
         date: "2026-01-15",
-        timeZone: "America/Chicago",
+        timeZone: "America/New_York",
         openMin: 9 * 60,
         closeMin: 11 * 60,
         closed: true,
@@ -207,13 +209,13 @@ describe("slots and money", () => {
 
     const slots = listOpenSlots({
       date: "2026-01-15",
-      timeZone: "America/Chicago",
+      timeZone: "America/New_York",
       openMin: 9 * 60,
       closeMin: 11 * 60,
       closed: false,
       durationMin: 60,
-      busy: [{ start: zonedTimeToUtc("2026-01-15", 9 * 60, "America/Chicago"), end: zonedTimeToUtc("2026-01-15", 10 * 60, "America/Chicago") }],
-      now: zonedTimeToUtc("2026-01-15", 8 * 60, "America/Chicago"),
+      busy: [{ start: zonedTimeToUtc("2026-01-15", 9 * 60, "America/New_York"), end: zonedTimeToUtc("2026-01-15", 10 * 60, "America/New_York") }],
+      now: zonedTimeToUtc("2026-01-15", 8 * 60, "America/New_York"),
     });
     expect(slots.map((slot) => slot.label)).toEqual(["10:00 AM"]);
   });
@@ -228,9 +230,9 @@ describe("slots and money", () => {
 });
 
 describe("locations", () => {
-  const oak = { id: "oak", name: "Oak Street", latitude: 41.9, longitude: -87.62, active: true };
-  const lincoln = { id: "lincoln", name: "Lincoln Park", latitude: 41.93, longitude: -87.65, active: true };
-  const evanston = { id: "evanston", name: "Evanston", latitude: 42.05, longitude: -87.68, active: true };
+  const chantilly = { id: "chantilly", name: "Chantilly", latitude: 38.894, longitude: -77.431, active: true };
+  const reston = { id: "reston", name: "Reston", latitude: 38.959, longitude: -77.357, active: true };
+  const fairfax = { id: "fairfax", name: "Fairfax", latitude: 38.846, longitude: -77.306, active: true };
 
   it("hides a service a location turned off and uses a price override", () => {
     expect(effectiveOffer({ priceCents: 4500, durationMin: 45 }, { available: false, priceCents: null, durationMin: null })).toBeNull();
@@ -242,26 +244,26 @@ describe("locations", () => {
 
   it("offers the nearest sibling location when the chosen chair is full", () => {
     const alternatives = rankAlternateLocations({
-      requestedLocationId: "oak",
-      origin: { latitude: oak.latitude, longitude: oak.longitude },
-      locations: [oak, lincoln, evanston],
+      requestedLocationId: "chantilly",
+      origin: { latitude: chantilly.latitude, longitude: chantilly.longitude },
+      locations: [chantilly, reston, fairfax],
       slotsByLocation: {
-        oak: [],
-        lincoln: [{ startIso: "2026-06-02T16:00:00Z", label: "11:00 AM", technicianId: "marcus", technicianName: "Marcus" }],
-        evanston: [{ startIso: "2026-06-02T17:00:00Z", label: "12:00 PM", technicianId: "yuki", technicianName: "Yuki" }],
+        chantilly: [],
+        reston: [{ startIso: "2026-06-02T16:00:00Z", label: "11:00 AM", technicianId: "marcus", technicianName: "Marcus" }],
+        fairfax: [{ startIso: "2026-06-02T17:00:00Z", label: "12:00 PM", technicianId: "yuki", technicianName: "Yuki" }],
       },
     });
-    expect(alternatives.map((location) => location.locationId)).toEqual(["lincoln", "evanston"]);
+    expect(alternatives.map((location) => location.locationId)).toEqual(["reston", "fairfax"]);
     expect(alternatives[0]?.slots[0]?.technicianName).toBe("Marcus");
     expect(alternatives[0]?.distanceKm ?? 0).toBeLessThan(alternatives[1]?.distanceKm ?? 0);
   });
 
   it("lets an owner see every location and keeps a manager inside their own", () => {
-    const oakOnly = [{ locationId: "oak", role: "MANAGER" }];
-    expect(canAccessLocation({ role: "MANAGER", memberships: oakOnly, locationId: "oak" })).toBe(true);
-    expect(canAccessLocation({ role: "MANAGER", memberships: oakOnly, locationId: "lincoln" })).toBe(false);
-    expect(canAccessLocation({ role: "MANAGER", memberships: oakOnly, locationId: "all" })).toBe(false);
-    expect(canAccessLocation({ role: "OWNER", memberships: [], locationId: "lincoln" })).toBe(true);
+    const chantillyOnly = [{ locationId: "chantilly", role: "MANAGER" }];
+    expect(canAccessLocation({ role: "MANAGER", memberships: chantillyOnly, locationId: "chantilly" })).toBe(true);
+    expect(canAccessLocation({ role: "MANAGER", memberships: chantillyOnly, locationId: "fairfax" })).toBe(false);
+    expect(canAccessLocation({ role: "MANAGER", memberships: chantillyOnly, locationId: "all" })).toBe(false);
+    expect(canAccessLocation({ role: "OWNER", memberships: [], locationId: "fairfax" })).toBe(true);
     expect(canAccessLocation({ role: "OWNER", memberships: [], locationId: "all" })).toBe(true);
   });
 
@@ -344,5 +346,53 @@ describe("provider selection", () => {
     expect(billingMode({})).toBe("stub");
     expect(billingMode({ STRIPE_SECRET_KEY: "sk_test" })).toBe("stub");
     expect(billingMode({ STRIPE_SECRET_KEY: "sk_test", STRIPE_PRICE_ID: "price_123" })).toBe("stripe");
+  });
+});
+
+describe("tickets, shifts, and favorites", () => {
+  it("totals a multi-service ticket and applies a percent discount plus tip", () => {
+    expect(ticketSummary([{ priceCents: 4500, durationMin: 45 }, { priceCents: 1200, durationMin: 15 }])).toEqual({
+      count: 2,
+      totalCents: 5700,
+      durationMin: 60,
+    });
+    const discount = discountCents(5700, "percent", 10);
+    expect(checkoutTotal({ subtotalCents: 5700, discountCents: discount, tipCents: 800 })).toEqual({
+      subtotalCents: 5700,
+      discountCents: 570,
+      tipCents: 800,
+      totalCents: 5930,
+    });
+  });
+
+  it("rejects an oversized refund and marks a full refund", () => {
+    expect(refundDecision({ totalCents: 5000, refundedCents: 0, amountCents: 6000 }).ok).toBe(false);
+    expect(refundDecision({ totalCents: 5000, refundedCents: 2000, amountCents: 3000 })).toMatchObject({ ok: true, status: "REFUNDED" });
+  });
+
+  it("keeps a chair inside the weekly shift", () => {
+    expect(slotWithinShifts(9 * 60, 45, [])).toBe(true);
+    expect(slotWithinShifts(9 * 60, 45, [{ startMin: 10 * 60, endMin: 18 * 60 }])).toBe(false);
+    expect(slotWithinShifts(10 * 60, 45, [{ startMin: 10 * 60, endMin: 18 * 60 }])).toBe(true);
+  });
+
+  it("sorts favorite technicians first and only lets the customer edit them", () => {
+    expect(sortByFavorite([{ id: "marcus", name: "Marcus" }, { id: "chloe", name: "Chloe" }], ["chloe"]).map((tech) => tech.id)).toEqual(["chloe", "marcus"]);
+    expect(favoriteNote("Ava", ["Chloe"])).toBe("Ava's favorite: Chloe");
+    expect(favoriteNote("Ava", [])).toBeNull();
+    expect(canEditFavorites("CUSTOMER")).toBe(true);
+    expect(canEditFavorites("FRONT_DESK")).toBe(false);
+    expect(canEditFavorites("OWNER")).toBe(false);
+  });
+
+  it("rolls sales, tips, and refunds into a report", () => {
+    const summary = summarizeSales(
+      [{ id: "o1", totalCents: 5000, tipCents: 800, discountCents: 0, technicianName: "Chloe", items: [{ name: "Gel", kind: "SERVICE", quantity: 1, unitCents: 4200 }] }],
+      [{ orderId: "o1", amountCents: 1000 }],
+    );
+    expect(summary.netCents).toBe(4000);
+    expect(summary.tipCents).toBe(800);
+    expect(summary.serviceMix[0]?.name).toBe("Gel");
+    expect(summary.technicians[0]?.salesCents).toBe(4000);
   });
 });

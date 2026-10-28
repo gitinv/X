@@ -1,4 +1,4 @@
-import { effectiveOffer, formatWhen, listOpenSlots, rankAlternateLocations, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
+import { effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, slotWithinShifts, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
 import { createBooking, recordSms } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -35,7 +35,13 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
     orderBy: { sortOrder: "asc" },
   });
   const noon = zonedTimeToUtc(date, 12 * 60, location.timezone);
-  const hours = location.hours.find((row) => row.dayOfWeek === weekdayIndex(date, location.timezone, noon));
+  const dayOfWeek = weekdayIndex(date, location.timezone, noon);
+  const shiftRows = technicians.length
+    ? await salon.db.shift.findMany({
+        where: { tenantId: salon.id, locationId: location.id, active: true, dayOfWeek, technicianId: { in: technicians.map((tech) => tech.id) } },
+      })
+    : [];
+  const hours = location.hours.find((row) => row.dayOfWeek === dayOfWeek);
   const dayStart = zonedTimeToUtc(date, 0, location.timezone);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const slots: { startIso: string; label: string; technicianId: string; technicianName: string }[] = [];
@@ -59,6 +65,8 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
       busy: busy.map((appointment) => ({ start: appointment.startAt, end: appointment.endAt })),
       now: new Date(),
     })) {
+      const windows = shiftRows.filter((shift) => shift.technicianId === technician.id);
+      if (!slotWithinShifts(minutesInZone(slot.start, location.timezone), service.durationMin, windows)) continue;
       slots.push({
         startIso: slot.start.toISOString(),
         label: slot.label,
