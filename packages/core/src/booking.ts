@@ -18,7 +18,7 @@ export function intervalsOverlap(a: TimeRange, b: TimeRange): boolean {
 }
 
 export function blocksSchedule(status: string): boolean {
-  return status === "BOOKED" || status === "CHECKED_IN" || status === "IN_SERVICE";
+  return status !== "CANCELLED" && status !== "NO_SHOW";
 }
 
 export function findBookingConflict<T extends BusyAppointment>(

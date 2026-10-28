@@ -110,14 +110,20 @@ export async function saveOffer(formData: FormData) {
   const duration = String(formData.get("duration") ?? "").trim();
   const existing = await user.db.serviceLocation.findUnique({ where: { serviceId_locationId: { serviceId, locationId } } });
   const priceCents = price ? Math.round(Number(price) * 100) : existing?.priceCents ?? null;
-  const durationMin = duration ? Number(duration) : existing?.durationMin ?? null;
+  const parsedDuration = duration ? Number(duration) : null;
+  if (parsedDuration !== null && (!Number.isInteger(parsedDuration) || parsedDuration <= 0)) {
+    redirect("/admin?tab=catalog&error=Please+enter+a+duration+greater+than+0+minutes.");
+  }
+  const durationMin = parsedDuration ?? existing?.durationMin ?? null;
   await user.db.serviceLocation.upsert({
     where: { serviceId_locationId: { serviceId, locationId } },
     update: { available, priceCents, durationMin },
     create: { tenantId: user.tenantId, serviceId, locationId, available, priceCents, durationMin },
   });
   revalidatePath("/admin");
-  redirect("/admin?tab=catalog&saved=1");
+  revalidatePath("/catalog");
+  const next = String(formData.get("next") ?? "");
+  redirect(next.startsWith("/") ? next : "/admin?tab=catalog&saved=1");
 }
 
 export async function saveBranding(formData: FormData) {

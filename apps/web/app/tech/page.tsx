@@ -2,11 +2,10 @@ import { setStaffLocation, updateVisit } from "@/app/pos/actions";
 import { LiveRefresh } from "@/components/live-refresh";
 import { PhotoCapture } from "@/components/photo-capture";
 import { StaffShell } from "@/components/shells";
-import { favoriteCardClass } from "@/components/favorite-mark";
 import { buttonClass } from "@/components/ui";
 import { requireRoles } from "@/lib/auth/session";
 import { staffScope } from "@/lib/staff-location";
-import { buildTurnBoard, canCaptureServicePhoto, favoriteNote, formatWhen } from "@redlady/core";
+import { buildTurnBoard, canCaptureServicePhoto, favoriteCardClass, favoriteNote, formatTime, formatWhen, reservedMinutes } from "@redlady/core";
 
 export const metadata = { title: "Tech screen" };
 
@@ -30,7 +29,7 @@ export default async function TechPage() {
       status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE", "READY"] },
       startAt: { lt: horizon },
     },
-    include: { client: { include: { favorites: true } }, service: true, technician: true },
+    include: { client: { include: { favorites: true } }, service: true, technician: true, lines: true },
     orderBy: { startAt: "asc" },
   });
   const activeVisits = visits.filter((visit) => visit.status !== "READY");
@@ -134,10 +133,12 @@ export default async function TechPage() {
                 <form key={visit.id} action={updateVisit} className={`rounded-3xl p-4 ${favorite ? favoriteCardClass(true) : "bg-white shadow-card"}`}>
                   <input type="hidden" name="id" value={visit.id} />
                   <p className="font-medium">{visit.client.name}</p>
-                  <p className="text-sm text-bark">{visit.service.name} · {visit.technician.name}</p>
+                  <p className="text-sm text-bark">{(visit.lines.length ? visit.lines.map((line) => line.name).join(", ") : visit.service.name)} · {visit.technician.name}</p>
+                  <p className="text-sm text-bark">{formatTime(visit.startAt, location.timezone)}–{formatTime(visit.endAt, location.timezone)} · {(visit.lines.reduce((sum, line) => sum + reservedMinutes(line), 0) || Math.round((visit.endAt.getTime() - visit.startAt.getTime()) / 60000))} min</p>
                   {note ? <p className="mt-1 text-sm"><span className="text-gold">★</span> {note}</p> : null}
                   <div className="mt-3 flex gap-2">
-                    {visit.status !== "IN_SERVICE" ? <button name="status" value="IN_SERVICE" className={buttonClass("solid")}>Start</button> : null}
+                    {visit.status === "CHECKED_IN" ? <button name="status" value="IN_SERVICE" className={buttonClass("solid")}>Start</button> : null}
+                    {visit.status === "BOOKED" ? <p className="text-sm text-bark">Checked in at the desk before this service can start.</p> : null}
                     {visit.status === "IN_SERVICE" ? <button name="status" value="READY" className={buttonClass("solid")}>Finish</button> : null}
                   </div>
                 </form>

@@ -7,7 +7,7 @@ import { createDownloadUrl } from "@/lib/photos/storage";
 import { staffScope } from "@/lib/staff-location";
 import { PhotoThumb } from "@/components/photo-thumb";
 import { saveShifts } from "@/app/catalog/actions";
-import { formatCents, formatClock, locationCharge, summarizeSales } from "@redlady/core";
+import { formatCents, formatClock, locationCharge, nextDateKey, summarizeSales, zonedDayKey, zonedTimeToUtc } from "@redlady/core";
 import { platform } from "@redlady/db";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -24,18 +24,22 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (!user.db || !user.tenantId || !user.salon) redirect("/login");
   const location = scope.current;
   const registry = await platform.tenant.findUnique({ where: { id: user.tenantId } });
-  const activeLocations = await user.db.location.count({ where: { tenantId: user.tenantId, active: true } });
+  const assignedIds = user.memberships.map((membership) => membership.locationId);
+  const locationScope = user.role === "OWNER" ? { tenantId: user.tenantId } : { tenantId: user.tenantId, id: { in: assignedIds } };
+  const activeLocations = await user.db.location.count({ where: { ...locationScope, active: true } });
   const charge = locationCharge({
     activeLocations,
     includedLocations: registry?.includedLocations ?? 1,
     extraLocationPriceCents: registry?.extraLocationPriceCents ?? 0,
   });
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
-  const fromDate = params.from ? new Date(`${params.from}T00:00:00`) : since;
-  const toDate = params.to ? new Date(`${params.to}T23:59:59.999`) : new Date(since.getTime() + 24 * 60 * 60 * 1000);
+  const reportZone = location?.timezone || user.salon.timezone;
+  const todayKey = zonedDayKey(new Date(), reportZone);
+  const fromKey = params.from || todayKey;
+  const toKey = params.to || todayKey;
+  const fromDate = zonedTimeToUtc(fromKey, 0, reportZone);
+  const toDate = zonedTimeToUtc(nextDateKey(toKey), 0, reportZone);
   const orders = await user.db.order.findMany({
-    where: { tenantId: user.tenantId, createdAt: { gte: fromDate, lte: toDate }, ...(location ? { locationId: location.id } : {}) },
+    where: { tenantId: user.tenantId, createdAt: { gte: fromDate, lt: toDate }, ...(location ? { locationId: location.id } : user.role === "OWNER" ? {} : { locationId: { in: assignedIds } }) },
     include: { location: true, items: true, refunds: true, appointment: { include: { technician: true } } },
   });
   const sales = summarizeSales(
@@ -50,7 +54,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     orders.flatMap((order) => order.refunds.map((refund) => ({ orderId: order.id, amountCents: refund.amountCents }))),
   );
   const services = tab === "catalog" ? await user.db.service.findMany({ where: { tenantId: user.tenantId, active: true }, include: { locations: true }, orderBy: { sortOrder: "asc" } }) : [];
-  const everyLocation = tab === "locations" ? await user.db.location.findMany({ where: { tenantId: user.tenantId }, orderBy: { sortOrder: "asc" } }) : [];
+  const everyLocation = tab === "locations" ? await user.db.location.findMany({ where: locationScope, orderBy: { sortOrder: "asc" } }) : [];
   const shiftTechs = tab === "shifts" && location ? await user.db.technician.findMany({ where: { tenantId: user.tenantId, locations: { some: { locationId: location.id } } }, include: { shifts: { where: { locationId: location.id } } }, orderBy: { name: "asc" } }) : [];
   const technicians = tab === "team" ? await user.db.technician.findMany({ where: { tenantId: user.tenantId }, include: { locations: true }, orderBy: { sortOrder: "asc" } }) : [];
   const hours = location ? await user.db.businessHour.findMany({ where: { locationId: location.id }, orderBy: { dayOfWeek: "asc" } }) : [];
@@ -100,8 +104,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <form className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="tab" value="reports" />
             {scope.all ? <input type="hidden" name="at" value="all" /> : null}
-            <label className="text-sm">From<input type="date" name="from" defaultValue={params.from ?? fromDate.toISOString().slice(0, 10)} /></label>
-            <label className="text-sm">To<input type="date" name="to" defaultValue={params.to ?? toDate.toISOString().slice(0, 10)} /></label>
+            <label className="text-sm">From<input type="date" name="from" defaultValue={fromKey} /></label>
+            <label className="text-sm">To<input type="date" name="to" defaultValue={toKey} /></label>
             <button className={buttonClass("solid")}>Show</button>
           </form>
           <div className="grid gap-3 sm:grid-cols-4">

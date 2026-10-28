@@ -128,6 +128,36 @@ const services: {
     supplies: ["Paraffin wax", "Mittens or booties"],
     sortOrder: 120,
   },
+  {
+    category: "Aura",
+    kind: "ADDON",
+    name: "Aura gradient",
+    description: "A soft color wash that fades from the cuticle to the tip.",
+    durationMin: 20,
+    priceCents: 1800,
+    supplies: ["Pigment", "Sponge", "Top coat"],
+    sortOrder: 130,
+  },
+  {
+    category: "Aura",
+    kind: "ADDON",
+    name: "Aura chrome",
+    description: "A mirror chrome veil rubbed over the color.",
+    durationMin: 25,
+    priceCents: 2200,
+    supplies: ["Chrome powder", "Top coat"],
+    sortOrder: 140,
+  },
+  {
+    category: "Aura",
+    kind: "ADDON",
+    name: "Aura airbrush",
+    description: "A fine sprayed fade, sealed under a glossy top coat.",
+    durationMin: 30,
+    priceCents: 2800,
+    supplies: ["Airbrush", "Pigment", "Top coat"],
+    sortOrder: 150,
+  },
 ];
 
 const products: {

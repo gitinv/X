@@ -106,6 +106,7 @@ model SalonProfile {
   assignments  StaffAssignment[]
   shifts       Shift[]
   audits       AuditEvent[]
+  signupCodes  SignupCode[]
 }
 
 model Location {
@@ -202,6 +203,7 @@ model Service {
   name         String
   description  String
   durationMin  Int
+  bufferMin    Int           @default(0)
   priceCents   Int
   supplies     String[]
   active       Boolean       @default(true)
@@ -224,6 +226,7 @@ model ServiceLocation {
   available   Boolean  @default(true)
   priceCents  Int?
   durationMin Int?
+  bufferMin   Int?
 
   @@unique([serviceId, locationId])
   @@index([tenantId, locationId])
@@ -400,6 +403,20 @@ model ClientFavorite {
   @@index([tenantId, clientId])
 }
 
+model SignupCode {
+  id        String       @id @default(cuid())
+  tenantId  String
+  salon     SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  email     String?
+  phone     String?
+  clientId  String?
+  codeHash  String
+  expiresAt DateTime
+  createdAt DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
 model AppointmentLine {
   id            String      @id @default(cuid())
   tenantId      String
@@ -411,6 +428,7 @@ model AppointmentLine {
   kind          ServiceKind
   priceCents    Int
   durationMin   Int
+  bufferMin     Int         @default(0)
   sortOrder     Int         @default(0)
 
   @@index([tenantId, appointmentId])

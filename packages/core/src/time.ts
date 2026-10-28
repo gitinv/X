@@ -61,6 +61,31 @@ export function minutesInZone(instant: Date, timeZone: string): number {
   return parts.hour * 60 + parts.minute;
 }
 
+export function zonedDateTimeToUtc(value: string, timeZone: string): Date | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  if (minutes >= 24 * 60) return null;
+  return zonedTimeToUtc(match[1], minutes, timeZone);
+}
+
+export function formatDateTimeLocal(instant: Date, timeZone: string): string {
+  const parts = zoneParts(instant, timeZone);
+  const month = String(parts.month).padStart(2, "0");
+  const day = String(parts.day).padStart(2, "0");
+  const hour = String(parts.hour).padStart(2, "0");
+  const minute = String(parts.minute).padStart(2, "0");
+  return `${parts.year}-${month}-${day}T${hour}:${minute}`;
+}
+
+export function nextDateKey(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new Error("Date must be YYYY-MM-DD.");
+  const next = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
 export function zonedDayKey(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,

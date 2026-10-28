@@ -1,14 +1,29 @@
 export interface TicketLine {
   priceCents: number;
   durationMin: number;
+  bufferMin?: number;
+}
+
+export function reservedMinutes(line: { durationMin: number; bufferMin?: number | null }) {
+  return line.durationMin + Math.max(0, line.bufferMin ?? 0);
 }
 
 export function ticketSummary(lines: TicketLine[]) {
   return {
     count: lines.length,
     totalCents: lines.reduce((sum, line) => sum + line.priceCents, 0),
-    durationMin: lines.reduce((sum, line) => sum + line.durationMin, 0),
+    durationMin: lines.reduce((sum, line) => sum + reservedMinutes(line), 0),
   };
+}
+
+export function requireServiceMinutes(durationMin: number, bufferMin = 0) {
+  if (!Number.isInteger(durationMin) || durationMin <= 0) {
+    return { ok: false as const, reason: "Please enter a duration greater than 0 minutes." };
+  }
+  if (!Number.isInteger(bufferMin) || bufferMin < 0) {
+    return { ok: false as const, reason: "Please enter a buffer of 0 minutes or more." };
+  }
+  return { ok: true as const, reservedMin: durationMin + bufferMin };
 }
 
 export function discountCents(subtotalCents: number, mode: "percent" | "amount", value: number) {
@@ -45,6 +60,20 @@ export interface ShiftWindow {
 export function slotWithinShifts(startMin: number, durationMin: number, shifts: ShiftWindow[]) {
   if (shifts.length === 0) return true;
   return shifts.some((shift) => startMin >= shift.startMin && startMin + durationMin <= shift.endMin);
+}
+
+export function blockFitsShift(startMin: number, durationMin: number, windows: ShiftWindow[], hasSchedule: boolean) {
+  if (!hasSchedule) return true;
+  if (durationMin <= 0 || windows.length === 0) return false;
+  return windows.some((shift) => startMin >= shift.startMin && startMin + durationMin <= shift.endMin);
+}
+
+export function serviceGroup(service: { category: string; kind: string }) {
+  const category = service.category.toLowerCase();
+  if (service.kind === "ADDON" || category.includes("aura")) return "Aura";
+  if (category.includes("pedi")) return "Pedicure";
+  if (category.includes("mani")) return "Manicure";
+  return "More";
 }
 
 export interface SalesOrder {

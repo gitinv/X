@@ -2,17 +2,21 @@
 
 import { bookAppointment, loadAlternates, loadSlots } from "@/app/book/actions";
 import { buttonClass } from "@/components/ui";
-import { FavoriteToggle, favoriteCardClass } from "@/components/favorite-mark";
-import { formatCents, sortByFavorite, type AlternateLocation } from "@redlady/core";
+import { FavoriteToggle } from "@/components/favorite-mark";
+import { favoriteCardClass } from "@redlady/core";
+import { ServiceTiles, TicketTotal } from "@/components/service-tiles";
+import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, type AlternateLocation } from "@redlady/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface ServiceChoice {
   id: string;
   category: string;
+  kind: "SERVICE" | "ADDON";
   name: string;
   description: string;
   durationMin: number;
+  bufferMin: number;
   priceCents: number;
 }
 
@@ -38,6 +42,7 @@ interface LocationOffer {
   available: boolean;
   priceCents: number | null;
   durationMin: number | null;
+  bufferMin: number | null;
 }
 
 function offerAt(service: ServiceChoice, locationId: string | undefined, offers: LocationOffer[]): ServiceChoice | null {
@@ -48,6 +53,7 @@ function offerAt(service: ServiceChoice, locationId: string | undefined, offers:
     ...service,
     priceCents: override?.priceCents ?? service.priceCents,
     durationMin: override?.durationMin ?? service.durationMin,
+    bufferMin: override?.bufferMin ?? service.bufferMin,
   };
 }
 
@@ -57,7 +63,7 @@ export function BookingWizard({
   locations,
   offers,
   initialDate,
-  presetServiceId,
+  presetServiceIds,
   presetTechnicianId,
   presetLocationSlug,
   suggestNearest,
@@ -70,7 +76,7 @@ export function BookingWizard({
   locations: LocationChoice[];
   offers: LocationOffer[];
   initialDate: string;
-  presetServiceId?: string;
+  presetServiceIds: string[];
   presetTechnicianId?: string;
   presetLocationSlug: string;
   suggestNearest: boolean;
@@ -79,7 +85,6 @@ export function BookingWizard({
   signedIn: boolean;
 }) {
   const router = useRouter();
-  const preset = services.find((service) => service.id === presetServiceId) ?? null;
   const [locationSlug, setLocationSlug] = useState(presetLocationSlug);
   const location = locations.find((item) => item.slug === locationSlug) ?? locations[0];
   const visibleTechs = technicians.filter((tech) => !location || tech.locationIds.includes(location.id));
@@ -87,10 +92,11 @@ export function BookingWizard({
     const priced = offerAt(item, location?.id, offers);
     return priced ? [priced] : [];
   });
-  const [service, setService] = useState<ServiceChoice | null>(preset);
+  const [selectedIds, setSelectedIds] = useState<string[]>(presetServiceIds);
   const [technician, setTechnician] = useState<TechChoice | null>(visibleTechs.find((tech) => tech.id === presetTechnicianId) ?? null);
   const [date, setDate] = useState(initialDate);
-  const [slots, setSlots] = useState<{ startIso: string; label: string }[]>([]);
+  const [slots, setSlots] = useState<{ startIso: string; label: string; technicianId: string; technicianName: string }[]>([]);
+  const [slotTechId, setSlotTechId] = useState("");
   const [alternates, setAlternates] = useState<AlternateLocation[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [startIso, setStartIso] = useState("");
@@ -104,10 +110,13 @@ export function BookingWizard({
   const [pendingAlternate, setPendingAlternate] = useState<{ locationSlug: string; locationName: string; technicianId: string; technicianName: string; startIso: string; label: string } | null>(null);
   const orderedTechs = sortByFavorite(visibleTechs, favoriteIds);
 
+  const chosen = visibleServices.filter((item) => selectedIds.includes(item.id));
+  const blockMinutes = chosen.reduce((sum, item) => sum + reservedMinutes(item), 0);
+
   useEffect(() => {
-    if (!service || !location) return;
-    if (!offerAt(service, location.id, offers)) setService(null);
-  }, [service, location, offers]);
+    if (!location) return;
+    setSelectedIds((current) => current.filter((id) => services.some((service) => service.id === id && offerAt(service, location.id, offers))));
+  }, [location, offers, services]);
 
   useEffect(() => {
     if (!suggestNearest || !navigator.geolocation) return;
@@ -117,16 +126,17 @@ export function BookingWizard({
   }, [router, suggestNearest]);
 
   useEffect(() => {
-    if (!service || !technician || !date || !location) return;
+    if (selectedIds.length === 0 || !date || !location) return;
     let cancel = false;
     setLoadingSlots(true);
     setStartIso("");
     setAlternates([]);
-    loadSlots(service.id, technician.id, date, location.slug)
+    const ids = selectedIds.join(",");
+    loadSlots(ids, technician?.id ?? "", date, location.slug)
       .then(async (next) => {
         if (cancel) return;
         setSlots(next);
-        if (next.length === 0) setAlternates(await loadAlternates(service.id, date, location.slug));
+        if (next.length === 0) setAlternates(await loadAlternates(ids, date, location.slug));
       })
       .finally(() => {
         if (!cancel) setLoadingSlots(false);
@@ -134,19 +144,19 @@ export function BookingWizard({
     return () => {
       cancel = true;
     };
-  }, [service, technician, date, location]);
+  }, [selectedIds, technician, date, location]);
 
   async function submit(choice?: { locationSlug: string; technicianId: string; startIso: string; technicianName: string }) {
-    if (!service) return;
+    if (selectedIds.length === 0) return;
     const chosenLocation = choice?.locationSlug ?? location?.slug;
-    const chosenTech = choice?.technicianId ?? technician?.id;
+    const chosenTech = choice?.technicianId ?? technician?.id ?? slotTechId;
     const chosenStart = choice?.startIso ?? startIso;
-    const techName = choice?.technicianName ?? technician?.name ?? "";
-    if (!chosenLocation || !chosenTech || !chosenStart) return;
+    const techName = choice?.technicianName ?? technician?.name ?? slots.find((slot) => slot.technicianId === chosenTech)?.technicianName ?? "";
+    if (!chosenLocation || !chosenStart || selectedIds.length === 0) return;
     setPending(true);
     setError("");
     const result = await bookAppointment({
-      serviceId: service.id,
+      serviceIds: selectedIds,
       technicianId: chosenTech,
       locationSlug: chosenLocation,
       startIso: chosenStart,
@@ -186,7 +196,7 @@ export function BookingWizard({
       <section className="space-y-6">
         <div>
           <h1 className="font-serif text-5xl italic leading-none text-wine">Reserve a chair</h1>
-          <p className="mt-3 text-sm text-bark">Pick a studio, a service, and an open time. If that chair is full, nearby studios appear below.</p>
+          <p className="mt-3 text-sm text-bark">Pick a manicure, a pedicure, and any aura add-ons. One technician keeps the whole block, back to back. If that chair is full, nearby studios appear below.</p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {locations.map((item) => (
@@ -204,28 +214,25 @@ export function BookingWizard({
             </button>
           ))}
         </div>
-        <div className="space-y-3">
-          {visibleServices.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setService(item)}
-              className={`w-full rounded-3xl border p-4 text-left ${service?.id === item.id ? "border-ink bg-white shadow-card" : "border-line bg-white/60"}`}
-            >
-              <span className="text-[10px] uppercase tracking-[0.16em] text-bark">{item.category}</span>
-              <span className="mt-1 flex items-baseline justify-between gap-3">
-                <span className="font-medium">{item.name}</span>
-                <span>{formatCents(item.priceCents)}</span>
-              </span>
-              <span className="mt-1 block text-sm text-bark">
-                {item.durationMin} min · {item.description}
-              </span>
-            </button>
+        <div className="space-y-5">
+          {(["Manicure", "Pedicure", "Aura", "More"] as const).map((group) => (
+            <ServiceTiles
+              key={group}
+              title={group === "Aura" ? "Aura add-ons" : group === "More" ? "More services" : group}
+              items={visibleServices
+                .filter((item) => serviceGroup(item) === group)
+                .map((item) => ({ id: item.id, name: item.name, priceCents: item.priceCents, durationMin: reservedMinutes(item) }))}
+              selected={selectedIds}
+              onToggle={(id) => setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))}
+            />
           ))}
+          <TicketTotal items={chosen.map((item) => ({ id: item.id, name: item.name, priceCents: item.priceCents, durationMin: reservedMinutes(item) }))} />
         </div>
       </section>
       <aside className="h-fit space-y-4 rounded-[2rem] bg-white p-5 shadow-card lg:sticky lg:top-24">
         <h2 className="font-serif text-3xl italic">Technician</h2>
+        <p className="text-sm text-bark">{blockMinutes > 0 ? `${blockMinutes} min together · ${formatCents(chosen.reduce((sum, item) => sum + item.priceCents, 0))}` : "Select services to see the block."}</p>
+        <button type="button" onClick={() => setTechnician(null)} className={buttonClass(technician ? "ghost" : "solid")}>Any technician</button>
         <div className="grid grid-cols-2 gap-2">
           {orderedTechs.map((item) => {
             const favorite = favoriteIds.includes(item.id);
@@ -249,10 +256,10 @@ export function BookingWizard({
         </label>
         <div className="flex flex-wrap gap-2">
           {loadingSlots ? <p className="text-sm text-bark">Checking the book…</p> : null}
-          {!loadingSlots && service && technician && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
+          {!loadingSlots && selectedIds.length > 0 && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
           {slots.map((slot) => (
-            <button key={slot.startIso} type="button" onClick={() => setStartIso(slot.startIso)} className={buttonClass(startIso === slot.startIso ? "solid" : "ghost", "px-3 py-2")}>
-              {slot.label}
+            <button key={`${slot.technicianId}-${slot.startIso}`} type="button" onClick={() => { setStartIso(slot.startIso); setSlotTechId(slot.technicianId); }} className={buttonClass(startIso === slot.startIso && slotTechId === slot.technicianId ? "solid" : "ghost", "px-3 py-2")}>
+              {slot.label}{technician ? "" : ` · ${slot.technicianName}`}
             </button>
           ))}
         </div>
@@ -297,7 +304,7 @@ export function BookingWizard({
         {pendingAlternate ? (
           <div className="rounded-2xl border-2 border-gold bg-cream p-3 text-sm">
             <p>
-              Book {service?.name} at {pendingAlternate.locationName} with {pendingAlternate.technicianName} at {pendingAlternate.label}?
+              Book {chosen.map((item) => item.name).join(", ")} at {pendingAlternate.locationName} with {pendingAlternate.technicianName} at {pendingAlternate.label}?
             </p>
             <div className="mt-2 flex gap-2">
               <button type="button" className={buttonClass("solid")} onClick={() => void submit(pendingAlternate)}>Confirm booking</button>
@@ -322,7 +329,7 @@ export function BookingWizard({
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
         </label>
         {error ? <p className="text-sm text-wine">{error}</p> : null}
-        <button type="button" className={buttonClass("solid", "w-full")} disabled={pending || !service || !technician || !startIso} onClick={() => void submit()}>
+        <button type="button" className={buttonClass("solid", "w-full")} disabled={pending || selectedIds.length === 0 || !startIso} onClick={() => void submit()}>
           {pending ? "Saving…" : "Book appointment"}
         </button>
       </aside>

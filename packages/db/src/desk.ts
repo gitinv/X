@@ -1,10 +1,27 @@
-import { BookingConflictError } from "./salon";
-import { checkoutTotal, discountCents, findBookingConflict, refundDecision, requireTenantId, ticketSummary } from "@redlady/core";
+import { ensureBlockIsFree } from "./salon";
+import { createHash } from "node:crypto";
+import { checkoutTotal, discountCents, normalizePhone, refundDecision, requireServiceMinutes, requireTenantId, reservedMinutes, samePhone, ticketSummary } from "@redlady/core";
 import type { Prisma, PrismaClient, ServiceKind } from "./generated/tenant";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const blocking = ["BOOKED", "CHECKED_IN", "IN_SERVICE"] as const;
+export class ExistingClientError extends Error {
+  readonly clientId: string;
+
+  constructor(clientId: string, name: string) {
+    super(`Please use the existing client ${name}.`);
+    this.name = "ExistingClientError";
+    this.clientId = clientId;
+  }
+}
+
+export async function findClientByContact(db: Db, tenantId: string, phone: string, email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const clients = await db.client.findMany({ where: { tenantId } });
+  return (
+    clients.find((client) => (normalizedEmail && client.email?.toLowerCase() === normalizedEmail) || samePhone(client.phone, phone)) ?? null
+  );
+}
 
 export async function writeAudit(
   db: Db,
@@ -48,6 +65,7 @@ async function pricedLines(db: Db, tenantId: string, locationId: string, service
         kind: service.kind,
         priceCents: override?.priceCents ?? service.priceCents,
         durationMin: override?.durationMin ?? service.durationMin,
+        bufferMin: override?.bufferMin ?? service.bufferMin,
         sortOrder: index,
       },
     ];
@@ -77,6 +95,8 @@ export async function saveVisitTicket(
   let clientId = input.clientId;
   if (!clientId) {
     if (!input.walkIn || input.walkIn.name.trim().length < 2) throw new Error("Please add a client name for the walk-in.");
+    const existing = await findClientByContact(db, tenantId, input.walkIn.phone, input.walkIn.email ?? "");
+    if (existing) throw new ExistingClientError(existing.id, existing.name);
     const client = await db.client.create({
       data: {
         tenantId,
@@ -96,48 +116,38 @@ export async function saveVisitTicket(
       summary: `Added walk-in ${client.name}.`,
     });
   }
-  const existing = await db.appointment.findMany({
-    where: {
+  const primary = lines[0]!;
+  const appointment = await db.$transaction(async (tx) => {
+    await ensureBlockIsFree(tx, {
       tenantId,
       technicianId: input.technicianId,
-      status: { in: [...blocking] },
-      ...(input.appointmentId ? { id: { not: input.appointmentId } } : {}),
-    },
+      locationId: input.locationId,
+      startAt: input.startAt,
+      endAt,
+      ignoreAppointmentId: input.appointmentId,
+    });
+    const saved = input.appointmentId
+      ? await tx.appointment.update({
+          where: { id: input.appointmentId },
+          data: { clientId, technicianId: input.technicianId, serviceId: primary.serviceId, locationId: input.locationId, startAt: input.startAt, endAt },
+        })
+      : await tx.appointment.create({
+          data: {
+            tenantId,
+            locationId: input.locationId,
+            clientId,
+            technicianId: input.technicianId,
+            serviceId: primary.serviceId,
+            startAt: input.startAt,
+            endAt,
+            status: input.startAt.getTime() > Date.now() + 2 * 60 * 1000 ? "BOOKED" : "CHECKED_IN",
+            paymentStatus: "UNPAID",
+          },
+        });
+    await tx.appointmentLine.deleteMany({ where: { appointmentId: saved.id } });
+    await tx.appointmentLine.createMany({ data: lines.map((line) => ({ ...line, appointmentId: saved.id })) });
+    return saved;
   });
-  const conflict = findBookingConflict(
-    existing.map((appointment) => ({ id: appointment.id, technicianId: appointment.technicianId, start: appointment.startAt, end: appointment.endAt, status: appointment.status })),
-    { technicianId: input.technicianId, start: input.startAt, end: endAt },
-  );
-  if (conflict) throw new BookingConflictError(conflict.id);
-
-  const primary = lines[0]!;
-  const appointment = input.appointmentId
-    ? await db.appointment.update({
-        where: { id: input.appointmentId },
-        data: {
-          clientId,
-          technicianId: input.technicianId,
-          serviceId: primary.serviceId,
-          locationId: input.locationId,
-          startAt: input.startAt,
-          endAt,
-        },
-      })
-    : await db.appointment.create({
-        data: {
-          tenantId,
-          locationId: input.locationId,
-          clientId,
-          technicianId: input.technicianId,
-          serviceId: primary.serviceId,
-          startAt: input.startAt,
-          endAt,
-          status: "CHECKED_IN",
-          paymentStatus: "UNPAID",
-        },
-      });
-  await db.appointmentLine.deleteMany({ where: { appointmentId: appointment.id } });
-  await db.appointmentLine.createMany({ data: lines.map((line) => ({ ...line, appointmentId: appointment.id })) });
   await db.client.update({ where: { id: clientId }, data: { lastLocationId: input.locationId } });
   await writeAudit(db, {
     tenantId,
@@ -150,25 +160,34 @@ export async function saveVisitTicket(
   return appointment;
 }
 
-export async function rescheduleVisit(db: Db, input: { tenantId: string; actorId: string; appointmentId: string; startAt: Date; confirm: boolean }) {
+function guardInService(status: string, actorRole: string | undefined) {
+  if (status === "IN_SERVICE" && actorRole !== "MANAGER" && actorRole !== "OWNER") {
+    throw new Error("Please ask a manager to change a visit that is already in service.");
+  }
+}
+
+export async function rescheduleVisit(db: Db, input: { tenantId: string; actorId: string; actorRole?: string; appointmentId: string; startAt: Date; confirm: boolean }) {
   if (!input.confirm) throw new Error("Please confirm the new time before saving it.");
   const tenantId = requireTenantId(input.tenantId);
   const visit = await db.appointment.findFirst({ where: { id: input.appointmentId, tenantId }, include: { lines: true } });
   if (!visit) throw new Error("That visit is not on this salon's book.");
   if (visit.status === "CANCELLED" || visit.status === "COMPLETED") throw new Error("Please pick a visit that is still on the book.");
+  guardInService(visit.status, input.actorRole);
   const durationMs = visit.lines.length
-    ? visit.lines.reduce((sum, line) => sum + line.durationMin, 0) * 60_000
+    ? visit.lines.reduce((sum, line) => sum + reservedMinutes(line), 0) * 60_000
     : visit.endAt.getTime() - visit.startAt.getTime();
   const nextEnd = new Date(input.startAt.getTime() + durationMs);
-  const existing = await db.appointment.findMany({
-    where: { tenantId, technicianId: visit.technicianId, status: { in: [...blocking] }, id: { not: visit.id } },
+  const updated = await (db as PrismaClient).$transaction(async (tx) => {
+    await ensureBlockIsFree(tx, {
+      tenantId,
+      technicianId: visit.technicianId,
+      locationId: visit.locationId,
+      startAt: input.startAt,
+      endAt: nextEnd,
+      ignoreAppointmentId: visit.id,
+    });
+    return tx.appointment.update({ where: { id: visit.id }, data: { startAt: input.startAt, endAt: nextEnd } });
   });
-  const conflict = findBookingConflict(
-    existing.map((appointment) => ({ id: appointment.id, technicianId: appointment.technicianId, start: appointment.startAt, end: appointment.endAt, status: appointment.status })),
-    { technicianId: visit.technicianId, start: input.startAt, end: nextEnd },
-  );
-  if (conflict) throw new BookingConflictError(conflict.id);
-  const updated = await db.appointment.update({ where: { id: visit.id }, data: { startAt: input.startAt, endAt: nextEnd } });
   await writeAudit(db, {
     tenantId,
     actorId: input.actorId,
@@ -180,11 +199,12 @@ export async function rescheduleVisit(db: Db, input: { tenantId: string; actorId
   return updated;
 }
 
-export async function cancelVisit(db: Db, input: { tenantId: string; actorId: string; appointmentId: string; confirm: boolean }) {
+export async function cancelVisit(db: Db, input: { tenantId: string; actorId: string; actorRole?: string; appointmentId: string; confirm: boolean }) {
   if (!input.confirm) throw new Error("Please confirm the cancellation before saving it.");
   const tenantId = requireTenantId(input.tenantId);
   const visit = await db.appointment.findFirst({ where: { id: input.appointmentId, tenantId } });
   if (!visit) throw new Error("That visit is not on this salon's book.");
+  guardInService(visit.status, input.actorRole);
   if (visit.paymentStatus === "PAID") throw new Error("Please refund the ticket before cancelling a paid visit.");
   const updated = await db.appointment.update({ where: { id: visit.id }, data: { status: "CANCELLED" } });
   await writeAudit(db, {
@@ -251,23 +271,30 @@ export async function registerCustomer(
   const tenantId = requireTenantId(input.tenantId);
   const email = input.email.trim().toLowerCase();
   const phone = input.phone.trim();
-  const digits = phone.replace(/\D/g, "").slice(-10);
   if (input.name.trim().length < 2) throw new Error("Please enter your name.");
-  if (!email.includes("@") && digits.length < 7) throw new Error("Please enter an email or a phone number.");
+  if (!email.includes("@") && normalizePhone(phone).length < 10) throw new Error("Please enter an email or a full phone number.");
   const taken = email ? await db.user.findUnique({ where: { email } }) : null;
   if (taken) throw new Error("Please sign in. An account already uses that email.");
-  const byEmail = email ? await db.client.findMany({ where: { tenantId, email: { equals: email, mode: "insensitive" } } }) : [];
-  const byPhone = digits
-    ? (await db.client.findMany({ where: { tenantId, phone: { not: null } } })).filter((row) => (row.phone ?? "").replace(/\D/g, "").endsWith(digits))
-    : [];
-  const candidates = [...byEmail, ...byPhone];
-  const client =
-    candidates[0] ??
-    (await db.client.create({
-      data: { tenantId, name: input.name.trim(), email: email || null, phone: phone || null },
-    }));
-  const linked = await db.user.findFirst({ where: { clientId: client.id } });
-  if (linked) throw new Error("Please sign in. That profile already has a login.");
+  const existing = await findClientByContact(db, tenantId, phone, email);
+  if (existing) {
+    const linked = await db.user.findFirst({ where: { clientId: existing.id } });
+    if (linked) throw new Error("Please sign in. That profile already has a login.");
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const challenge = await db.signupCode.create({
+      data: {
+        tenantId,
+        email: email || null,
+        phone: normalizePhone(phone) || null,
+        clientId: existing.id,
+        codeHash: createHash("sha256").update(code).digest("hex"),
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+    return { status: "verify" as const, challengeId: challenge.id, demoCode: code, clientId: existing.id };
+  }
+  const client = await db.client.create({
+    data: { tenantId, name: input.name.trim(), email: email || null, phone: phone || null },
+  });
   const user = await db.user.create({
     data: {
       tenantId,
@@ -279,6 +306,31 @@ export async function registerCustomer(
       clientId: client.id,
     },
   });
+  return { status: "created" as const, user, client };
+}
+
+export async function confirmSignup(db: Db, input: { tenantId: string; challengeId: string; code: string; name: string; passwordHash: string }) {
+  const tenantId = requireTenantId(input.tenantId);
+  const challenge = await db.signupCode.findFirst({ where: { id: input.challengeId, tenantId } });
+  if (!challenge || challenge.expiresAt.getTime() < Date.now()) throw new Error("Please request a new code.");
+  const hash = createHash("sha256").update(input.code.trim()).digest("hex");
+  if (hash !== challenge.codeHash || !challenge.clientId) throw new Error("Please check the code and try again.");
+  const client = await db.client.findFirst({ where: { id: challenge.clientId, tenantId } });
+  if (!client) throw new Error("Please request a new code.");
+  const linked = await db.user.findFirst({ where: { clientId: client.id } });
+  if (linked) throw new Error("Please sign in. That profile already has a login.");
+  const user = await db.user.create({
+    data: {
+      tenantId,
+      email: challenge.email || client.email || `guest-${client.id}@clients.redlady.local`,
+      name: input.name.trim() || client.name,
+      phone: challenge.phone,
+      passwordHash: input.passwordHash,
+      role: "CUSTOMER",
+      clientId: client.id,
+    },
+  });
+  await db.signupCode.delete({ where: { id: challenge.id } });
   return { user, client };
 }
 
@@ -293,11 +345,14 @@ export async function saveCatalogService(
     description: string;
     priceCents: number;
     durationMin: number;
+    bufferMin?: number;
     kind: ServiceKind;
     active: boolean;
   },
 ) {
   const tenantId = requireTenantId(input.tenantId);
+  const minutes = requireServiceMinutes(input.durationMin, input.bufferMin ?? 0);
+  if (!minutes.ok) throw new Error(minutes.reason);
   if (input.name.trim().length < 2) throw new Error("Please name the service.");
   const data = {
     name: input.name.trim(),
@@ -305,6 +360,7 @@ export async function saveCatalogService(
     description: input.description.trim(),
     priceCents: input.priceCents,
     durationMin: input.durationMin,
+    bufferMin: input.bufferMin ?? 0,
     kind: input.kind,
     active: input.active,
   };
@@ -359,12 +415,12 @@ export async function replaceShifts(
 ) {
   const tenantId = requireTenantId(input.tenantId);
   await db.shift.deleteMany({ where: { tenantId, technicianId: input.technicianId, locationId: input.locationId } });
-  const active = input.days.filter((day) => day.active);
-  if (active.length) {
+  if (input.days.length) {
     await db.shift.createMany({
-      data: active.map((day) => ({ tenantId, technicianId: input.technicianId, locationId: input.locationId, ...day })),
+      data: input.days.map((day) => ({ tenantId, technicianId: input.technicianId, locationId: input.locationId, ...day })),
     });
   }
+  const active = input.days.filter((day) => day.active);
   await writeAudit(db, {
     tenantId,
     actorId: input.actorId,

@@ -10,7 +10,7 @@ export const metadata = { title: "Book" };
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string; tech?: string; location?: string; near?: string }>;
+  searchParams: Promise<{ service?: string; services?: string; tech?: string; location?: string; near?: string }>;
 }) {
   const params = await searchParams;
   const jar = await cookies();
@@ -43,7 +43,9 @@ export default async function BookPage({
           category: service.category,
           name: service.name,
           description: service.description,
+          kind: service.kind,
           durationMin: service.durationMin,
+          bufferMin: service.bufferMin,
           priceCents: service.priceCents,
         }))}
         technicians={technicians.map((technician) => ({
@@ -66,9 +68,10 @@ export default async function BookPage({
           available: offer.available,
           priceCents: offer.priceCents,
           durationMin: offer.durationMin,
+          bufferMin: offer.bufferMin,
         }))}
         initialDate={tomorrow}
-        presetServiceId={params.service}
+        presetServiceIds={(params.services ?? params.service ?? "").split(",").map((id) => id.trim()).filter(Boolean)}
         presetTechnicianId={params.tech}
         presetLocationSlug={salon.location.slug}
         suggestNearest={!params.location && !params.near && !hasCookie && !client?.lastLocationId}

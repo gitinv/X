@@ -1,4 +1,4 @@
-import { effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, slotWithinShifts, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
+import { blockFitsShift, effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, reservedMinutes, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
 import { createBooking, recordSms } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -8,8 +8,6 @@ import { publicError } from "./errors";
 import { dispatchSms } from "./sms";
 import { LOCATION_COOKIE, getPublicTenant, weekdayIndex, type PublicSalon, type SalonLocation } from "./tenant";
 
-const blocking = ["BOOKED", "CHECKED_IN", "IN_SERVICE"] as const;
-
 async function offerFor(salon: PublicSalon, locationId: string, serviceId: string) {
   const service = await salon.db.service.findFirst({ where: { id: serviceId, tenantId: salon.id, active: true } });
   if (!service) return null;
@@ -18,13 +16,14 @@ async function offerFor(salon: PublicSalon, locationId: string, serviceId: strin
   });
   const priced = effectiveOffer(service, override);
   if (!priced) return null;
-  return { ...service, priceCents: priced.priceCents, durationMin: priced.durationMin };
+  return { ...service, priceCents: priced.priceCents, durationMin: priced.durationMin, bufferMin: priced.bufferMin };
 }
 
-export async function slotsAtLocation(salon: PublicSalon, location: SalonLocation, serviceId: string, technicianId: string | null, date: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
-  const service = await offerFor(salon, location.id, serviceId);
-  if (!service) return [];
+export async function slotsAtLocation(salon: PublicSalon, location: SalonLocation, serviceIds: string[], technicianId: string | null, date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || serviceIds.length === 0) return [];
+  const chosen = (await Promise.all(serviceIds.map((serviceId) => offerFor(salon, location.id, serviceId)))).filter((service) => service !== null);
+  if (chosen.length !== serviceIds.length) return [];
+  const durationMin = chosen.reduce((sum, service) => sum + reservedMinutes(service), 0);
   const technicians = await salon.db.technician.findMany({
     where: {
       tenantId: salon.id,
@@ -38,7 +37,7 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
   const dayOfWeek = weekdayIndex(date, location.timezone, noon);
   const shiftRows = technicians.length
     ? await salon.db.shift.findMany({
-        where: { tenantId: salon.id, locationId: location.id, active: true, dayOfWeek, technicianId: { in: technicians.map((tech) => tech.id) } },
+        where: { tenantId: salon.id, locationId: location.id, technicianId: { in: technicians.map((tech) => tech.id) } },
       })
     : [];
   const hours = location.hours.find((row) => row.dayOfWeek === dayOfWeek);
@@ -50,7 +49,7 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
       where: {
         tenantId: salon.id,
         technicianId: technician.id,
-        status: { in: [...blocking] },
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
         startAt: { lt: dayEnd },
         endAt: { gt: dayStart },
       },
@@ -61,12 +60,13 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
       openMin: hours?.openMin ?? 9 * 60,
       closeMin: hours?.closeMin ?? 19 * 60,
       closed: hours?.closed ?? false,
-      durationMin: service.durationMin,
+      durationMin,
       busy: busy.map((appointment) => ({ start: appointment.startAt, end: appointment.endAt })),
       now: new Date(),
     })) {
-      const windows = shiftRows.filter((shift) => shift.technicianId === technician.id);
-      if (!slotWithinShifts(minutesInZone(slot.start, location.timezone), service.durationMin, windows)) continue;
+      const mine = shiftRows.filter((shift) => shift.technicianId === technician.id);
+      const today = mine.filter((shift) => shift.active && shift.dayOfWeek === dayOfWeek);
+      if (!blockFitsShift(minutesInZone(slot.start, location.timezone), durationMin, today, mine.length > 0)) continue;
       slots.push({
         startIso: slot.start.toISOString(),
         label: slot.label,
@@ -78,21 +78,23 @@ export async function slotsAtLocation(salon: PublicSalon, location: SalonLocatio
   return slots;
 }
 
-export async function loadSlots(serviceId: string, technicianId: string, date: string, locationSlug?: string) {
+export async function loadSlots(serviceIds: string, technicianId: string, date: string, locationSlug?: string) {
   const salon = await getPublicTenant({ locationSlug });
   if (!salon) return [];
   const location = salon.locations.find((item) => item.slug === (locationSlug || salon.location.slug)) ?? salon.location;
-  return slotsAtLocation(salon, location, serviceId, technicianId, date);
+  const ids = serviceIds.split(",").map((id) => id.trim()).filter(Boolean);
+  return slotsAtLocation(salon, location, ids, technicianId || null, date);
 }
 
-export async function loadAlternates(serviceId: string, date: string, locationSlug: string): Promise<AlternateLocation[]> {
+export async function loadAlternates(serviceIds: string, date: string, locationSlug: string): Promise<AlternateLocation[]> {
   const salon = await getPublicTenant({ locationSlug });
   if (!salon) return [];
   const requested = salon.locations.find((item) => item.slug === locationSlug) ?? salon.location;
   const slotsByLocation: Record<string, { startIso: string; label: string; technicianId: string; technicianName: string }[]> = {};
   for (const location of salon.locations) {
     if (location.id === requested.id) continue;
-    slotsByLocation[location.id] = (await slotsAtLocation(salon, location, serviceId, null, date)).slice(0, 3);
+    const ids = serviceIds.split(",").map((id) => id.trim()).filter(Boolean);
+    slotsByLocation[location.id] = (await slotsAtLocation(salon, location, ids, null, date)).slice(0, 3);
   }
   const origin = requested.latitude != null && requested.longitude != null ? { latitude: requested.latitude, longitude: requested.longitude } : null;
   return rankAlternateLocations({
@@ -104,8 +106,8 @@ export async function loadAlternates(serviceId: string, date: string, locationSl
 }
 
 const bookingSchema = z.object({
-  serviceId: z.string().min(1),
-  technicianId: z.string().min(1),
+  serviceIds: z.array(z.string().min(1)).min(1),
+  technicianId: z.string(),
   locationSlug: z.string().min(1),
   startIso: z.string().datetime(),
   name: z.string().trim().min(2).max(80),
@@ -115,7 +117,7 @@ const bookingSchema = z.object({
 });
 
 export async function bookAppointment(input: {
-  serviceId: string;
+  serviceIds: string[];
   technicianId: string;
   locationSlug: string;
   startIso: string;
@@ -131,17 +133,18 @@ export async function bookAppointment(input: {
   const session = await getSession();
   const parsed = bookingSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Check the name and phone, then pick a time." };
-  const service = await offerFor(salon, location.id, parsed.data.serviceId);
-  const technician = await salon.db.technician.findFirst({
-    where: { id: parsed.data.technicianId, tenantId: salon.id, active: true, locations: { some: { locationId: location.id, active: true } } },
-  });
-  if (!service || !technician) return { ok: false as const, error: "Choose a service and a technician at this location." };
+  const chosen = (await Promise.all(parsed.data.serviceIds.map((serviceId) => offerFor(salon, location.id, serviceId)))).filter((service) => service !== null);
+  if (chosen.length !== parsed.data.serviceIds.length) return { ok: false as const, error: "Choose a service that this studio offers." };
   const start = new Date(parsed.data.startIso);
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: location.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(start);
-  const slots = await slotsAtLocation(salon, location, service.id, technician.id, date);
-  if (!slots.some((slot) => new Date(slot.startIso).getTime() === start.getTime())) {
-    return { ok: false as const, error: "That time was just taken. Pick another." };
-  }
+  const open = await slotsAtLocation(salon, location, parsed.data.serviceIds, parsed.data.technicianId || null, date);
+  const slot = open.find((item) => new Date(item.startIso).getTime() === start.getTime() && (!parsed.data.technicianId || item.technicianId === parsed.data.technicianId));
+  if (!slot) return { ok: false as const, error: "That time is no longer available." };
+  const technician = await salon.db.technician.findFirst({
+    where: { id: slot.technicianId, tenantId: salon.id, active: true, locations: { some: { locationId: location.id, active: true } } },
+  });
+  if (!technician) return { ok: false as const, error: "Choose a technician at this location." };
+  const service = chosen[0]!;
 
   let clientId = session?.tenantId === salon.id ? session.clientId : null;
   if (!clientId) {
@@ -159,6 +162,7 @@ export async function bookAppointment(input: {
   await salon.db.client.update({ where: { id: clientId }, data: { lastLocationId: location.id } });
 
   try {
+    const reserved = chosen.reduce((sum, item) => sum + reservedMinutes(item), 0);
     const appointment = await createBooking(salon.db, {
       tenantId: salon.id,
       locationId: location.id,
@@ -166,12 +170,21 @@ export async function bookAppointment(input: {
       technicianId: technician.id,
       serviceId: service.id,
       startAt: start,
-      endAt: new Date(start.getTime() + service.durationMin * 60_000),
+      endAt: new Date(start.getTime() + reserved * 60_000),
       notes: parsed.data.notes,
+      lines: chosen.map((item) => ({
+        serviceId: item.id,
+        name: item.name,
+        kind: item.kind,
+        priceCents: item.priceCents,
+        durationMin: item.durationMin,
+        bufferMin: item.bufferMin,
+      })),
     });
     const jar = await cookies();
     jar.set(LOCATION_COOKIE, location.slug, { path: "/", maxAge: 60 * 60 * 24 * 180, sameSite: "lax" });
-    const body = `${salon.name} (${location.name}): ${parsed.data.name}, you are booked for ${service.name} with ${technician.name} on ${formatWhen(start, location.timezone)}.`;
+    const names = chosen.map((item) => item.name).join(", ");
+    const body = `${salon.name} (${location.name}): ${parsed.data.name}, you are booked for ${names} with ${technician.name} on ${formatWhen(start, location.timezone)}.`;
     try {
       const sent = await dispatchSms(parsed.data.phone, body);
       await recordSms(salon.db, { tenantId: salon.id, to: parsed.data.phone, body, provider: sent.name, providerId: sent.providerId });
@@ -188,7 +201,7 @@ export async function bookAppointment(input: {
     revalidatePath("/pos");
     revalidatePath("/tech");
     revalidatePath("/account");
-    return { ok: true as const, when: formatWhen(appointment.startAt, location.timezone), service: service.name, technician: technician.name, location: location.name };
+    return { ok: true as const, when: formatWhen(appointment.startAt, location.timezone), service: names, technician: technician.name, location: location.name };
   } catch (error) {
     return { ok: false as const, error: publicError(error) };
   }

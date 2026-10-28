@@ -3,6 +3,7 @@ import { bookAppointment } from "@/lib/booking";
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     serviceId?: string;
+    serviceIds?: string[];
     technicianId?: string;
     locationSlug?: string;
     startIso?: string;
@@ -11,8 +12,9 @@ export async function POST(request: Request) {
     email?: string;
     notes?: string;
   } | null;
+  const serviceIds = body?.serviceIds?.length ? body.serviceIds : body?.serviceId ? [body.serviceId] : [];
   const result = await bookAppointment({
-    serviceId: String(body?.serviceId ?? ""),
+    serviceIds,
     technicianId: String(body?.technicianId ?? ""),
     locationSlug: String(body?.locationSlug ?? ""),
     startIso: String(body?.startIso ?? ""),

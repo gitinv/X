@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "That location is outside your access." }, { status: 403 });
   }
   try {
-    const updated = await cancelVisit(salon.db, { tenantId: salon.id, actorId: user.id, appointmentId: visit.id, confirm: body?.confirm === true });
+    const updated = await cancelVisit(salon.db, { tenantId: salon.id, actorId: user.id, actorRole: user.role, appointmentId: visit.id, confirm: body?.confirm === true });
     return Response.json({ id: updated.id, status: updated.status });
   } catch (error) {
     return Response.json({ error: publicError(error) }, { status: 400 });

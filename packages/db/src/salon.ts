@@ -1,4 +1,4 @@
-import { InventoryError, checkoutTotal, findBookingConflict, planInventoryDecrement, requireTenantId } from "@redlady/core";
+import { InventoryError, blockFitsShift, checkoutTotal, findBookingConflict, minutesInZone, planInventoryDecrement, requireTenantId } from "@redlady/core";
 import { Prisma, type PaymentMethod, type PrismaClient } from "./generated/tenant";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -7,7 +7,7 @@ export class BookingConflictError extends Error {
   readonly appointmentId: string;
 
   constructor(appointmentId: string) {
-    super("That technician is already booked then.");
+    super("That time is no longer available.");
     this.name = "BookingConflictError";
     this.appointmentId = appointmentId;
   }
@@ -19,6 +19,7 @@ export async function clearTenantDatabase(db: PrismaClient) {
   await db.refund.deleteMany();
   await db.orderItem.deleteMany();
   await db.order.deleteMany();
+  await db.signupCode.deleteMany();
   await db.auditEvent.deleteMany();
   await db.clientFavorite.deleteMany();
   await db.appointmentLine.deleteMany();
@@ -44,26 +45,31 @@ export async function clearTenantDatabase(db: PrismaClient) {
   await db.salonProfile.deleteMany();
 }
 
-export async function createBooking(
+function weekdayInZone(instant: Date, timeZone: string) {
+  const name = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(instant);
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[name] ?? 0;
+}
+
+export async function ensureBlockIsFree(
   db: Db,
-  input: {
-    tenantId: string;
-    locationId: string;
-    clientId: string;
-    technicianId: string;
-    serviceId: string;
-    startAt: Date;
-    endAt: Date;
-    notes?: string;
-  },
+  input: { tenantId: string; technicianId: string; locationId: string; startAt: Date; endAt: Date; ignoreAppointmentId?: string },
 ) {
   const tenantId = requireTenantId(input.tenantId);
+  const locked = await db.$queryRaw<{ id: string }[]>`SELECT id FROM "Technician" WHERE id = ${input.technicianId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+  if (locked.length === 0) throw new Error("Please choose a technician.");
+  if (input.endAt.getTime() <= input.startAt.getTime()) throw new BookingConflictError("duration");
+  const location = await db.location.findFirst({ where: { id: input.locationId, tenantId } });
+  const timeZone = location?.timezone || "UTC";
+  const shifts = await db.shift.findMany({ where: { tenantId, technicianId: input.technicianId, locationId: input.locationId } });
+  if (shifts.length > 0) {
+    const day = weekdayInZone(input.startAt, timeZone);
+    const windows = shifts.filter((shift) => shift.active && shift.dayOfWeek === day);
+    const durationMin = Math.round((input.endAt.getTime() - input.startAt.getTime()) / 60_000);
+    if (!blockFitsShift(minutesInZone(input.startAt, timeZone), durationMin, windows, true)) throw new BookingConflictError("shift");
+  }
   const existing = await db.appointment.findMany({
-    where: {
-      tenantId,
-      technicianId: input.technicianId,
-      status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE"] },
-    },
+    where: { tenantId, technicianId: input.technicianId, ...(input.ignoreAppointmentId ? { id: { not: input.ignoreAppointmentId } } : {}) },
   });
   const conflict = findBookingConflict(
     existing.map((appointment) => ({
@@ -76,38 +82,73 @@ export async function createBooking(
     { technicianId: input.technicianId, start: input.startAt, end: input.endAt },
   );
   if (conflict) throw new BookingConflictError(conflict.id);
+}
 
-  const service = await db.service.findFirst({ where: { id: input.serviceId, tenantId } });
-  if (!service) throw new Error("That service is not on the menu.");
-  const override = await db.serviceLocation.findUnique({
-    where: { serviceId_locationId: { serviceId: service.id, locationId: input.locationId } },
-  });
-  const appointment = await db.appointment.create({
-    data: {
-      tenantId,
-      locationId: input.locationId,
-      clientId: input.clientId,
-      technicianId: input.technicianId,
-      serviceId: input.serviceId,
-      startAt: input.startAt,
-      endAt: input.endAt,
-      notes: input.notes,
-      status: "BOOKED",
-      paymentStatus: "UNPAID",
-    },
-  });
-  await db.appointmentLine.create({
-    data: {
-      tenantId,
-      appointmentId: appointment.id,
-      serviceId: service.id,
-      name: service.name,
-      kind: service.kind,
-      priceCents: override?.priceCents ?? service.priceCents,
-      durationMin: override?.durationMin ?? service.durationMin,
-    },
-  });
-  return appointment;
+function unavailable(error: unknown): never {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Appointment_technician_time_excl") || message.includes("23P01") || message.includes("exclusion constraint")) {
+    throw new BookingConflictError("constraint");
+  }
+  throw error;
+}
+
+export async function createBooking(
+  db: PrismaClient,
+  input: {
+    tenantId: string;
+    locationId: string;
+    clientId: string;
+    technicianId: string;
+    serviceId: string;
+    startAt: Date;
+    endAt: Date;
+    notes?: string;
+    lines?: { serviceId: string; name: string; kind: "SERVICE" | "ADDON"; priceCents: number; durationMin: number; bufferMin: number }[];
+  },
+) {
+  const tenantId = requireTenantId(input.tenantId);
+  try {
+    return await db.$transaction(async (tx) => {
+      await ensureBlockIsFree(tx, input);
+      const service = await tx.service.findFirst({ where: { id: input.serviceId, tenantId } });
+      if (!service) throw new Error("That service is not on the menu.");
+      const override = await tx.serviceLocation.findUnique({
+        where: { serviceId_locationId: { serviceId: service.id, locationId: input.locationId } },
+      });
+      const appointment = await tx.appointment.create({
+        data: {
+          tenantId,
+          locationId: input.locationId,
+          clientId: input.clientId,
+          technicianId: input.technicianId,
+          serviceId: input.serviceId,
+          startAt: input.startAt,
+          endAt: input.endAt,
+          notes: input.notes,
+          status: "BOOKED",
+          paymentStatus: "UNPAID",
+        },
+      });
+      const lines = input.lines?.length
+        ? input.lines
+        : [
+            {
+              serviceId: service.id,
+              name: service.name,
+              kind: service.kind,
+              priceCents: override?.priceCents ?? service.priceCents,
+              durationMin: override?.durationMin ?? service.durationMin,
+              bufferMin: override?.bufferMin ?? service.bufferMin,
+            },
+          ];
+      await tx.appointmentLine.createMany({
+        data: lines.map((line, index) => ({ tenantId, appointmentId: appointment.id, sortOrder: index, ...line })),
+      });
+      return appointment;
+    });
+  } catch (error) {
+    unavailable(error);
+  }
 }
 
 export async function commitCheckout(

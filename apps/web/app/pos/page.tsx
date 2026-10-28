@@ -1,12 +1,11 @@
 import { cancelFromDesk, refundFromDesk, rescheduleFromDesk, setStaffLocation, takePayment, updateVisit } from "@/app/pos/actions";
-import { favoriteCardClass } from "@/components/favorite-mark";
 import { StaffShell } from "@/components/shells";
 import { TicketForm } from "@/components/ticket-form";
 import { Notice, buttonClass } from "@/components/ui";
 import { pricedService } from "@/lib/offers";
 import { requireRoles } from "@/lib/auth/session";
 import { staffScope } from "@/lib/staff-location";
-import { favoriteNote, formatCents, formatWhen, isLowStock } from "@redlady/core";
+import { favoriteCardClass, favoriteNote, formatCents, formatDateTimeLocal, formatTime, formatWhen, isLowStock, reservedMinutes } from "@redlady/core";
 import Link from "next/link";
 
 export const metadata = { title: "Front desk" };
@@ -14,7 +13,7 @@ export const metadata = { title: "Front desk" };
 export default async function PosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; saved?: string; error?: string; q?: string; visit?: string; confirm?: string; move?: string; client?: string }>;
+  searchParams: Promise<{ tab?: string; saved?: string; error?: string; q?: string; visit?: string; confirm?: string; move?: string; client?: string; match?: string }>;
 }) {
   const params = await searchParams;
   const user = await requireRoles(["FRONT_DESK", "MANAGER", "OWNER"]);
@@ -115,6 +114,7 @@ export default async function PosPage({
                     <p className="font-medium">{visit.client.name}</p>
                     <p className="text-sm text-bark">{formatWhen(visit.startAt, location.timezone)} · {visit.technician.name}</p>
                     <p className="mt-1 text-sm">{visit.lines.length ? visit.lines.map((line) => line.name).join(" · ") : visit.service.name}</p>
+                    <p className="text-sm text-bark">{formatTime(visit.startAt, location.timezone)}–{formatTime(visit.endAt, location.timezone)} · {visit.lines.reduce((sum, line) => sum + reservedMinutes(line), 0) || Math.round((visit.endAt.getTime() - visit.startAt.getTime()) / 60000)} min</p>
                     {note ? <p className="mt-2 text-sm text-ink"><span className="text-gold">★</span> {note}</p> : null}
                     {!visit.client.photoConsentAt && user.salon?.photoConsentRequired ? <p className="mt-2 text-sm text-wine">Service photos are blocked until this guest agrees.</p> : null}
                   </div>
@@ -160,7 +160,12 @@ export default async function PosPage({
       ) : null}
 
       {tab === "ticket" ? (
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
+          {params.match ? (
+            <Notice>
+              That phone or email is already a client. <Link href={`/pos?tab=ticket&client=${params.match}`} className="underline">Use this profile</Link> instead of creating another.
+            </Notice>
+          ) : null}
           <TicketForm
             locationId={location.id}
             appointmentId={editing?.id}
@@ -170,6 +175,7 @@ export default async function PosPage({
             favoriteIds={favoriteIds}
             initialServiceIds={editing?.lines.map((line) => line.serviceId) ?? []}
             initialTechnicianId={editing?.technicianId}
+            initialStart={editing ? formatDateTimeLocal(editing.startAt, location.timezone) : undefined}
             client={ticketClient ? { id: ticketClient.id, name: ticketClient.name } : null}
           />
         </div>

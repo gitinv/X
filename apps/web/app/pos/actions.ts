@@ -4,8 +4,8 @@ import { requireRoles } from "@/lib/auth/session";
 import { publicError } from "@/lib/errors";
 import { assertLocation, staffScope } from "@/lib/staff-location";
 import { STAFF_LOCATION_COOKIE } from "@/lib/tenant";
-import { discountCents } from "@redlady/core";
-import { cancelVisit, commitCheckout, refundTicket, rescheduleVisit, saveVisitTicket } from "@redlady/db";
+import { discountCents, zonedDateTimeToUtc } from "@redlady/core";
+import { ExistingClientError, cancelVisit, commitCheckout, refundTicket, rescheduleVisit, saveVisitTicket } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -74,14 +74,13 @@ export async function takePayment(formData: FormData) {
   const tipCents = Math.round(Number(formData.get("tip") ?? 0) * 100) || 0;
   const discountValue = Number(formData.get("discount") ?? 0) || 0;
   const discountMode = formData.get("discountMode") === "percent" ? "percent" : "amount";
-  let discountAmount = 0;
-  if (appointmentId) {
-    const visit = await user.db.appointment.findFirst({ where: { id: appointmentId, tenantId: user.tenantId }, include: { lines: true, service: true } });
-    const subtotal =
-      (visit?.lines.reduce((sum, line) => sum + line.priceCents, 0) ?? 0) +
-      lines.reduce((sum, line) => sum + (products.find((row) => row.productId === line.productId)?.product.priceCents ?? 0) * line.quantity, 0);
-    discountAmount = discountCents(subtotal, discountMode, discountMode === "percent" ? discountValue : Math.round(discountValue * 100));
-  }
+  const visit = appointmentId
+    ? await user.db.appointment.findFirst({ where: { id: appointmentId, tenantId: user.tenantId }, include: { lines: true } })
+    : null;
+  const subtotal =
+    (visit?.lines.reduce((sum, line) => sum + line.priceCents, 0) ?? 0) +
+    lines.reduce((sum, line) => sum + (products.find((row) => row.productId === line.productId)?.product.priceCents ?? 0) * line.quantity, 0);
+  const discountAmount = discountCents(subtotal, discountMode, discountMode === "percent" ? discountValue : Math.round(discountValue * 100));
   try {
     await commitCheckout(user.db, {
       tenantId: user.tenantId,
@@ -107,13 +106,17 @@ export async function saveTicket(formData: FormData) {
   assertLocation(user, locationId);
   const serviceIds = formData.getAll("serviceId").map(String).filter(Boolean);
   const when = String(formData.get("start") ?? "");
-  const startAt = when ? new Date(when) : new Date();
+  const studio = await user.db.location.findFirst({ where: { id: locationId, tenantId: user.tenantId } });
+  const appointmentId = String(formData.get("appointmentId") ?? "");
+  const parsed = when ? zonedDateTimeToUtc(when, studio?.timezone || "UTC") : null;
+  const existing = appointmentId ? await user.db.appointment.findFirst({ where: { id: appointmentId, tenantId: user.tenantId } }) : null;
+  const startAt = parsed ?? existing?.startAt ?? new Date();
   try {
     await saveVisitTicket(user.db, {
       tenantId: user.tenantId,
       actorId: user.id,
       locationId,
-      appointmentId: String(formData.get("appointmentId") ?? "") || undefined,
+      appointmentId: appointmentId || undefined,
       clientId: String(formData.get("clientId") ?? "") || undefined,
       walkIn: { name: String(formData.get("name") ?? ""), phone: String(formData.get("phone") ?? ""), email: String(formData.get("email") ?? "") },
       technicianId: String(formData.get("technicianId") ?? ""),
@@ -121,6 +124,7 @@ export async function saveTicket(formData: FormData) {
       startAt,
     });
   } catch (error) {
+    if (error instanceof ExistingClientError) redirect(`/pos?tab=ticket&match=${error.clientId}`);
     redirect(`/pos?tab=ticket&error=${encodeURIComponent(publicError(error))}`);
   }
   revalidatePath("/pos");
@@ -131,12 +135,16 @@ export async function saveTicket(formData: FormData) {
 export async function rescheduleFromDesk(formData: FormData) {
   const user = await requireRoles(["FRONT_DESK", "MANAGER", "OWNER"]);
   if (!user.db || !user.tenantId) redirect("/login");
+  const visit = await user.db.appointment.findFirst({ where: { id: String(formData.get("id") ?? ""), tenantId: user.tenantId }, include: { location: true } });
+  const startAt = zonedDateTimeToUtc(String(formData.get("start") ?? ""), visit?.location.timezone || "UTC");
+  if (!startAt) redirect("/pos?error=Please+choose+a+time.");
   try {
     await rescheduleVisit(user.db, {
       tenantId: user.tenantId,
       actorId: user.id,
+      actorRole: user.role,
       appointmentId: String(formData.get("id") ?? ""),
-      startAt: new Date(String(formData.get("start") ?? "")),
+      startAt,
       confirm: formData.get("confirm") === "yes",
     });
   } catch (error) {
@@ -154,6 +162,7 @@ export async function cancelFromDesk(formData: FormData) {
       tenantId: user.tenantId,
       actorId: user.id,
       appointmentId: String(formData.get("id") ?? ""),
+      actorRole: user.role,
       confirm: formData.get("confirm") === "yes",
     });
   } catch (error) {

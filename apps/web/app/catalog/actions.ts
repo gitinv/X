@@ -2,7 +2,7 @@
 
 import { requireUser } from "@/lib/auth/session";
 import { publicError } from "@/lib/errors";
-import { dollarsToCents } from "@redlady/core";
+import { dollarsToCents, requireServiceMinutes } from "@redlady/core";
 import { replaceShifts, retireCatalogRow, saveCatalogService } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -16,10 +16,18 @@ function catalogUser() {
   });
 }
 
-export async function saveService(formData: FormData) {
+async function ownerCatalog() {
   const user = await catalogUser();
+  if (user.role !== "OWNER") redirect("/catalog?error=Only+the+owner+can+change+the+shared+catalog.");
+  return user;
+}
+
+export async function saveService(formData: FormData) {
+  const user = await ownerCatalog();
   const price = dollarsToCents(String(formData.get("price") ?? ""));
   if (price == null) redirect("/catalog?error=Please+enter+a+price.");
+  const minutes = requireServiceMinutes(Number(formData.get("duration")), Number(formData.get("buffer") ?? 0) || 0);
+  if (!minutes.ok) redirect(`/catalog?error=${encodeURIComponent(minutes.reason)}`);
   try {
     await saveCatalogService(user.db!, {
       tenantId: user.tenantId!,
@@ -29,7 +37,8 @@ export async function saveService(formData: FormData) {
       category: String(formData.get("category") ?? ""),
       description: String(formData.get("description") ?? ""),
       priceCents: price,
-      durationMin: Number(formData.get("duration") ?? 30) || 30,
+      durationMin: Number(formData.get("duration")),
+      bufferMin: Number(formData.get("buffer") ?? 0) || 0,
       kind: formData.get("kind") === "ADDON" ? "ADDON" : "SERVICE",
       active: formData.get("active") === "on",
     });
@@ -42,7 +51,7 @@ export async function saveService(formData: FormData) {
 }
 
 export async function saveProduct(formData: FormData) {
-  const user = await catalogUser();
+  const user = await ownerCatalog();
   const price = dollarsToCents(String(formData.get("price") ?? ""));
   if (price == null) redirect("/catalog?error=Please+enter+a+price.");
   const id = String(formData.get("id") ?? "");
@@ -72,7 +81,7 @@ export async function saveProduct(formData: FormData) {
 }
 
 export async function saveTechnician(formData: FormData) {
-  const user = await catalogUser();
+  const user = await ownerCatalog();
   const id = String(formData.get("id") ?? "");
   const data = {
     name: String(formData.get("name") ?? "").trim(),
@@ -95,7 +104,8 @@ export async function saveTechnician(formData: FormData) {
 }
 
 export async function retireRow(formData: FormData) {
-  const user = await catalogUser();
+  const user = await ownerCatalog();
+  if (formData.get("confirm") !== "yes") redirect("/catalog?error=Please+confirm+that+catalog+change.");
   const entityType = String(formData.get("entityType") ?? "");
   if (entityType !== "Service" && entityType !== "Product" && entityType !== "Technician") redirect("/catalog");
   try {

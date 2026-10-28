@@ -1,7 +1,8 @@
 "use client";
 
 import { saveTicket } from "@/app/pos/actions";
-import { FavoriteMark, favoriteCardClass } from "@/components/favorite-mark";
+import { FavoriteMark } from "@/components/favorite-mark";
+import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal, type TileChoice } from "@/components/service-tiles";
 import { buttonClass } from "@/components/ui";
 import { sortByFavorite } from "@redlady/core";
@@ -16,6 +17,7 @@ export function TicketForm({
   favoriteIds,
   initialServiceIds,
   initialTechnicianId,
+  initialStart,
   client,
 }: {
   locationId: string;
@@ -26,6 +28,7 @@ export function TicketForm({
   favoriteIds: string[];
   initialServiceIds: string[];
   initialTechnicianId?: string;
+  initialStart?: string;
   client: { id: string; name: string } | null;
 }) {
   const [selected, setSelected] = useState(initialServiceIds);
@@ -53,7 +56,7 @@ export function TicketForm({
       )}
       <label className="block text-sm">
         <span className="mb-1 block text-bark">Starts</span>
-        <input type="datetime-local" name="start" />
+        <input type="datetime-local" name="start" defaultValue={initialStart} />
       </label>
       <ServiceTiles title="Services" items={services} selected={selected} onToggle={toggle} />
       <ServiceTiles title="Add-ons" items={addons} selected={selected} onToggle={toggle} />

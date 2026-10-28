@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       tenantId: salon.id,
       actorId: user.id,
       appointmentId: visit.id,
+      actorRole: user.role,
       startAt: new Date(String(body?.startIso ?? "")),
       confirm: body?.confirm === true,
     });

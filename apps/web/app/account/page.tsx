@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth/session";
 import { createDownloadUrl } from "@/lib/photos/storage";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { PhotoThumb } from "@/components/photo-thumb";
-import { canViewServicePhoto, favoriteNote, formatWhen } from "@redlady/core";
+import { canViewServicePhoto, favoriteNote, formatTime, formatWhen, reservedMinutes } from "@redlady/core";
 import Link from "next/link";
 
 export const metadata = { title: "Your visits" };
@@ -23,7 +23,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     user.clientId && user.db && user.tenantId
       ? await user.db.appointment.findMany({
           where: { tenantId: user.tenantId, clientId: user.clientId },
-          include: { service: true, technician: true, location: true, photos: true, client: { include: { favorites: true } } },
+          include: { service: true, technician: true, location: true, photos: true, lines: { orderBy: { sortOrder: "asc" } }, client: { include: { favorites: true } } },
           orderBy: { startAt: "desc" },
         })
       : [];
@@ -73,7 +73,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
             const cancellable = (visit.status === "BOOKED" || visit.status === "CHECKED_IN") && visit.startAt.getTime() - Date.now() >= windowHours * 60 * 60 * 1000;
             return (
               <li key={visit.id} className="rounded-3xl bg-white p-4 shadow-card">
-                <p className="font-medium">{visit.service.name}</p>
+                <p className="font-medium">{visit.lines.length ? visit.lines.map((line) => line.name).join(", ") : visit.service.name}</p>
+                <p className="text-sm text-bark">{formatTime(visit.startAt, visit.location.timezone)}–{formatTime(visit.endAt, visit.location.timezone)} · {visit.lines.length ? visit.lines.reduce((sum, line) => sum + reservedMinutes(line), 0) : Math.round((visit.endAt.getTime() - visit.startAt.getTime()) / 60000)} min</p>
                 <p className="flex items-center gap-1 text-sm text-bark">
                   {formatWhen(visit.startAt, visit.location.timezone)} · {visit.technician.name}
                   <FavoriteToggle technicianId={visit.technicianId} name={visit.technician.name} active={visit.client.favorites.some((favorite) => favorite.technicianId === visit.technicianId)} />
@@ -92,7 +93,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                 ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {visit.status === "COMPLETED" ? (
-                    <Link className={buttonClass("solid")} href={`/book?service=${visit.serviceId}&tech=${visit.technicianId}&location=${visit.location.slug}`}>
+                    <Link className={buttonClass("solid")} href={`/book?services=${(visit.lines.length ? visit.lines.map((line) => line.serviceId) : [visit.serviceId]).join(",")}&tech=${visit.technicianId}&location=${visit.location.slug}`}>
                       Book this again
                     </Link>
                   ) : null}

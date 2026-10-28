@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { InventoryError, assertSameTenant, canAccessLocation, canViewServicePhoto } from "@redlady/core";
 import { getTenantClient, platform, urlForDatabase } from "./clients";
 import { createPhysicalDatabase, migrateTenantUrl } from "./provision";
-import { cancelVisit, refundTicket, registerCustomer, saveVisitTicket, toggleFavorite } from "./desk";
+import { ExistingClientError, cancelVisit, confirmSignup, refundTicket, registerCustomer, replaceShifts, saveVisitTicket, toggleFavorite } from "./desk";
 import { BookingConflictError, commitCheckout, createBooking, sendDueReminders } from "./salon";
 
 const stamp = `${Date.now().toString(36)}${Math.random().toString(16).slice(2, 6)}`;
@@ -44,7 +44,7 @@ async function makeSalon(slug: string) {
   });
   await db.technicianLocation.create({ data: { tenantId: tenant.id, technicianId: technician.id, locationId: location.id } });
   const client = await db.client.create({
-    data: { tenantId: tenant.id, name: "Ava", phone: "555-0199", email: `ava-${slug}-${stamp}@example.com` },
+    data: { tenantId: tenant.id, name: "Ava", phone: "703-555-0199", email: `ava-${slug}-${stamp}@example.com` },
   });
   const product = await db.product.create({
     data: { tenantId: tenant.id, name: "Cuticle oil", category: "CARE", description: "test", priceCents: 1050 },
@@ -254,11 +254,116 @@ describe("salon database rules", () => {
       tenantId: salon.tenant.id,
       name: "Ava",
       email: "",
-      phone: "555-0199",
+      phone: "(703) 555-0199",
       passwordHash: "hash",
     });
-    expect(signed.client.id).toBe(salon.client.id);
-    expect(signed.user.role).toBe("CUSTOMER");
+    expect(signed.status).toBe("verify");
+    if (signed.status !== "verify") return;
+    const linked = await confirmSignup(salon.db, {
+      tenantId: salon.tenant.id,
+      challengeId: signed.challengeId,
+      code: signed.demoCode,
+      name: "Ava",
+      passwordHash: "hash",
+    });
+    expect(linked.client.id).toBe(salon.client.id);
+    expect(linked.user.role).toBe("CUSTOMER");
+    const partial = await registerCustomer(salon.db, {
+      tenantId: salon.tenant.id,
+      name: "Other",
+      email: "other@example.com",
+      phone: "199",
+      passwordHash: "hash",
+    });
+    expect(partial.status).toBe("created");
+  });
+
+  it("books a future ticket, blocks a day off, and discounts retail", async () => {
+    const salon = await makeSalon("rules");
+    const future = await saveVisitTicket(salon.db, {
+      tenantId: salon.tenant.id,
+      actorId: "desk",
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceIds: [salon.service.id],
+      startAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+    expect(future.status).toBe("BOOKED");
+    await salon.db.appointment.update({ where: { id: future.id }, data: { status: "IN_SERVICE" } });
+    await expect(
+      cancelVisit(salon.db, { tenantId: salon.tenant.id, actorId: "desk", actorRole: "FRONT_DESK", appointmentId: future.id, confirm: true }),
+    ).rejects.toThrow(/manager/i);
+    await replaceShifts(salon.db, {
+      tenantId: salon.tenant.id,
+      actorId: "owner",
+      technicianId: salon.technician.id,
+      locationId: salon.location.id,
+      days: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ dayOfWeek: day, startMin: 9 * 60, endMin: 19 * 60, active: day !== 1 })),
+    });
+    await expect(
+      createBooking(salon.db, {
+        tenantId: salon.tenant.id,
+        locationId: salon.location.id,
+        clientId: salon.client.id,
+        technicianId: salon.technician.id,
+        serviceId: salon.service.id,
+        startAt: new Date("2026-08-03T15:00:00Z"),
+        endAt: new Date("2026-08-03T15:45:00Z"),
+      }),
+    ).rejects.toBeInstanceOf(BookingConflictError);
+    await expect(
+      saveVisitTicket(salon.db, {
+        tenantId: salon.tenant.id,
+        actorId: "desk",
+        locationId: salon.location.id,
+        technicianId: salon.technician.id,
+        serviceIds: [salon.service.id],
+        startAt: new Date(),
+        walkIn: { name: "Ava Again", phone: "703.555.0199", email: "" },
+      }),
+    ).rejects.toBeInstanceOf(ExistingClientError);
+    const retail = await commitCheckout(salon.db, {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      paymentMethod: "CASH",
+      products: [{ productId: salon.product.id, quantity: 1 }],
+      discountCents: 500,
+    });
+    expect(retail.discountCents).toBe(500);
+    expect(retail.totalCents).toBe(550);
+  });
+
+  it("rejects a second simultaneous booking and a block that runs past the shift", async () => {
+    const salon = await makeSalon("blocks");
+    const start = new Date("2026-08-03T15:00:00Z");
+    const end = new Date("2026-08-03T15:45:00Z");
+    const input = {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      clientId: salon.client.id,
+      technicianId: salon.technician.id,
+      serviceId: salon.service.id,
+      startAt: start,
+      endAt: end,
+    };
+    const results = await Promise.allSettled([createBooking(salon.db, input), createBooking(salon.db, input)]);
+    const saved = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(saved).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(BookingConflictError);
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toBe("That time is no longer available.");
+    await salon.db.shift.create({
+      data: { tenantId: salon.tenant.id, technicianId: salon.technician.id, locationId: salon.location.id, dayOfWeek: 1, startMin: 9 * 60, endMin: 10 * 60 },
+    });
+    await expect(
+      createBooking(salon.db, {
+        ...input,
+        startAt: new Date("2026-08-03T09:00:00Z"),
+        endAt: new Date("2026-08-03T10:30:00Z"),
+      }),
+    ).rejects.toBeInstanceOf(BookingConflictError);
   });
 });
 

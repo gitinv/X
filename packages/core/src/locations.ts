@@ -10,16 +10,22 @@ export interface OfferOverride {
   available: boolean;
   priceCents: number | null;
   durationMin: number | null;
+  bufferMin?: number | null;
 }
 
 export function effectiveOffer(
-  catalog: { priceCents: number; durationMin: number },
+  catalog: { priceCents: number; durationMin: number; bufferMin?: number },
   override?: OfferOverride | null,
-): { priceCents: number; durationMin: number } | null {
+): { priceCents: number; durationMin: number; bufferMin: number } | null {
   if (override && !override.available) return null;
+  const durationMin = override?.durationMin ?? catalog.durationMin;
+  if (!Number.isInteger(durationMin) || durationMin <= 0) return null;
+  const bufferMin = override?.bufferMin ?? catalog.bufferMin ?? 0;
+  if (!Number.isInteger(bufferMin) || bufferMin < 0) return null;
   return {
     priceCents: override?.priceCents ?? catalog.priceCents,
-    durationMin: override?.durationMin ?? catalog.durationMin,
+    durationMin,
+    bufferMin,
   };
 }
 

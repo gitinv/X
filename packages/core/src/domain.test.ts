@@ -7,9 +7,9 @@ import { InventoryError, planInventoryDecrement } from "./inventory";
 import { dollarsToCents, formatClock, parseClock } from "./money";
 import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
-import { canEditFavorites, favoriteNote, sortByFavorite } from "./favorites";
-import { checkoutTotal, discountCents, refundDecision, slotWithinShifts, summarizeSales, ticketSummary } from "./ticket";
-import { listOpenSlots, zonedTimeToUtc } from "./time";
+import { canEditFavorites, favoriteCardClass, favoriteNote, normalizePhone, samePhone, sortByFavorite } from "./favorites";
+import { formatDateTimeLocal, listOpenSlots, nextDateKey, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
+import { blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary } from "./ticket";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
 const at = (iso: string) => new Date(iso);
@@ -236,9 +236,10 @@ describe("locations", () => {
 
   it("hides a service a location turned off and uses a price override", () => {
     expect(effectiveOffer({ priceCents: 4500, durationMin: 45 }, { available: false, priceCents: null, durationMin: null })).toBeNull();
-    expect(effectiveOffer({ priceCents: 4500, durationMin: 45 }, { available: true, priceCents: 5000, durationMin: null })).toEqual({
+    expect(effectiveOffer({ priceCents: 4500, durationMin: 45, bufferMin: 5 }, { available: true, priceCents: 5000, durationMin: null })).toEqual({
       priceCents: 5000,
       durationMin: 45,
+      bufferMin: 5,
     });
   });
 
@@ -383,6 +384,36 @@ describe("tickets, shifts, and favorites", () => {
     expect(canEditFavorites("CUSTOMER")).toBe(true);
     expect(canEditFavorites("FRONT_DESK")).toBe(false);
     expect(canEditFavorites("OWNER")).toBe(false);
+    expect(favoriteCardClass(true)).toContain("border-gold");
+    expect(samePhone("(703) 555-0177", "17035550177")).toBe(true);
+    expect(samePhone("555-0177", "703-555-0177")).toBe(false);
+    expect(normalizePhone("17035550177")).toBe("7035550177");
+  });
+
+  it("reads a studio wall time instead of UTC", () => {
+    expect(zonedDateTimeToUtc("2026-01-15T19:00", "America/New_York")?.toISOString()).toBe("2026-01-16T00:00:00.000Z");
+    expect(nextDateKey("2026-01-31")).toBe("2026-02-01");
+    expect(formatDateTimeLocal(new Date("2026-01-16T00:00:00.000Z"), "America/New_York")).toBe("2026-01-15T19:00");
+  });
+
+  it("adds buffers into the reserved block and refuses a zero duration", () => {
+    expect(ticketSummary([{ priceCents: 2500, durationMin: 30, bufferMin: 5 }, { priceCents: 1800, durationMin: 20 }])).toMatchObject({
+      durationMin: 55,
+      totalCents: 4300,
+    });
+    expect(requireServiceMinutes(0).ok).toBe(false);
+    expect(requireServiceMinutes(30, -1).ok).toBe(false);
+    expect(requireServiceMinutes(30, 5)).toEqual({ ok: true, reservedMin: 35 });
+    expect(serviceGroup({ category: "Aura", kind: "ADDON" })).toBe("Aura");
+    expect(serviceGroup({ category: "Mani Bar", kind: "SERVICE" })).toBe("Manicure");
+    expect(serviceGroup({ category: "Pedi Bar", kind: "SERVICE" })).toBe("Pedicure");
+  });
+
+  it("rejects a block that runs past the end of the shift", () => {
+    const shift = [{ startMin: 9 * 60, endMin: 10 * 60 }];
+    expect(blockFitsShift(9 * 60, 90, shift, true)).toBe(false);
+    expect(blockFitsShift(9 * 60, 60, shift, true)).toBe(true);
+    expect(blockFitsShift(9 * 60, 60, [], true)).toBe(false);
   });
 
   it("rolls sales, tips, and refunds into a report", () => {

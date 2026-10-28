@@ -11,13 +11,22 @@ export async function POST(request: Request) {
   const password = String(body?.password ?? "");
   if (password.length < 8) return Response.json({ error: "Use at least 8 characters for the password." }, { status: 400 });
   try {
-    const { user, client } = await registerCustomer(salon.db, {
+    const result = await registerCustomer(salon.db, {
       tenantId: salon.id,
       name: String(body?.name ?? ""),
       email: String(body?.email ?? ""),
       phone: String(body?.phone ?? ""),
       passwordHash: await hashPassword(password),
     });
+    if (result.status === "verify") {
+      console.log(`Signup code for ${body?.email || body?.phone}: ${result.demoCode}`);
+      return Response.json({
+        needsVerification: true,
+        challengeId: result.challengeId,
+        ...(process.env.DEMO_HINTS === "true" ? { demoCode: result.demoCode } : {}),
+      });
+    }
+    const { user, client } = result;
     const session = {
       userId: user.id,
       email: user.email,

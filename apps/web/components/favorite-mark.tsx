@@ -53,7 +53,3 @@ export function FavoriteMark({
     </button>
   );
 }
-
-export function favoriteCardClass(active: boolean) {
-  return active ? "border-2 border-gold bg-white" : "border border-line bg-white";
-}
