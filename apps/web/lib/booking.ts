@@ -1,10 +1,11 @@
-import { assertSingleCoreServices, blockFitsShift, effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, reservedMinutes, samePhone, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
+import { assertSingleCoreServices, blockFitsShift, bookingFieldErrors, effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, reservedMinutes, resolveBookingIdentity, zonedDayKey, zonedTimeToUtc, type AlternateLocation, type BookingFieldErrors } from "@redlady/core";
 import { createBooking, findClientByContact, recordSms } from "@redlady/db";
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { z } from "zod";
 import { getSession } from "./auth/session";
 import { publicError } from "./errors";
+import { signManageToken } from "./manage-token";
 import { dispatchSms } from "./sms";
 import { LOCATION_COOKIE, getPublicTenant, weekdayIndex, type PublicSalon, type SalonLocation } from "./tenant";
 
@@ -110,9 +111,9 @@ const bookingSchema = z.object({
   technicianId: z.string(),
   locationSlug: z.string().min(1),
   startIso: z.string().datetime(),
-  name: z.string().trim().min(2).max(80),
-  phone: z.string().trim().min(7).max(30),
-  email: z.string().trim().email().optional().or(z.literal("")),
+  name: z.string().trim().max(80).optional(),
+  phone: z.string().trim().max(30).optional(),
+  email: z.string().trim().max(120).optional(),
   notes: z.string().trim().max(400).optional(),
   idempotencyKey: z.string().trim().min(8).max(80).optional(),
 });
@@ -134,7 +135,7 @@ export async function bookAppointment(input: {
   if (!location) return { ok: false as const, error: "Choose a location." };
   const session = await getSession();
   const parsed = bookingSchema.safeParse(input);
-  if (!parsed.success) return { ok: false as const, error: "Check the name and phone, then pick a time." };
+  if (!parsed.success) return { ok: false as const, error: "Check the visit details, then pick a time.", fields: {} as BookingFieldErrors };
   const chosen = (await Promise.all(parsed.data.serviceIds.map((serviceId) => offerFor(salon, location.id, serviceId)))).filter((service) => service !== null);
   if (chosen.length !== parsed.data.serviceIds.length) return { ok: false as const, error: "Choose a service that this studio offers." };
   const core = assertSingleCoreServices(chosen);
@@ -167,21 +168,28 @@ export async function bookAppointment(input: {
   if (!technician) return { ok: false as const, error: "Choose a technician at this location." };
   const service = chosen[0]!;
 
-  const email = (parsed.data.email || "").trim().toLowerCase();
-  const phone = parsed.data.phone.trim();
-  let clientId: string | null = null;
-  if (session?.tenantId === salon.id && session.clientId) {
-    const owner = await salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id } });
-    const emailOk = !email || owner?.email?.toLowerCase() === email;
-    const phoneOk = !phone || samePhone(owner?.phone, phone);
-    if (owner && emailOk && phoneOk) clientId = owner.id;
+  const today = zonedDayKey(new Date(), location.timezone);
+  if (date < today) return { ok: false as const, error: "Pick today or a later date", fields: { date: "Pick today or a later date" } };
+  const signedInClient =
+    session?.tenantId === salon.id && session.clientId
+      ? await salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id } })
+      : null;
+  const identity = resolveBookingIdentity({
+    signedIn: signedInClient,
+    entered: { name: parsed.data.name ?? "", email: parsed.data.email ?? "", phone: parsed.data.phone ?? "" },
+  });
+  if (identity.mode === "guest") {
+    const fields = bookingFieldErrors({ name: identity.name, phone: identity.phone, email: identity.email, date, today });
+    const first = fields.name || fields.phone || fields.email || fields.date;
+    if (first) return { ok: false as const, error: first, fields };
   }
+  let clientId = identity.clientId;
   if (!clientId) {
-    const existing = await findClientByContact(salon.db, salon.id, phone, email);
+    const existing = await findClientByContact(salon.db, salon.id, identity.phone, identity.email);
     const client =
       existing ??
       (await salon.db.client.create({
-        data: { tenantId: salon.id, name: parsed.data.name, phone, email: email || null, lastLocationId: location.id },
+        data: { tenantId: salon.id, name: identity.name, phone: identity.phone, email: identity.email || null, lastLocationId: location.id },
       }));
     clientId = client.id;
   }
@@ -212,7 +220,18 @@ export async function bookAppointment(input: {
     const jar = await cookies();
     jar.set(LOCATION_COOKIE, location.slug, { path: "/", maxAge: 60 * 60 * 24 * 180, sameSite: "lax" });
     const names = chosen.map((item) => item.name).join(", ");
-    const body = `${salon.name} (${location.name}): ${parsed.data.name}, you are booked for ${names} with ${technician.name} on ${formatWhen(start, location.timezone)}.`;
+    const headerStore = await headers();
+    const host = headerStore.get("x-forwarded-host") || headerStore.get("host") || "";
+    const proto = headerStore.get("x-forwarded-proto") || "https";
+    let manageUrl = "";
+    try {
+      const token = await signManageToken({ appointmentId: appointment.id, tenantId: salon.id });
+      manageUrl = `${proto}://${host}/book/manage/${token}`;
+    } catch (error) {
+      console.log(`[email:console] manage link skipped: ${error instanceof Error ? error.message : "unknown"}`);
+    }
+    const body = `${salon.name} (${location.name}): ${identity.name}, you are booked for ${names} with ${technician.name} on ${formatWhen(start, location.timezone)}.${manageUrl ? ` Manage or cancel: ${manageUrl}` : ""}`;
+    if (identity.email) console.log(`[email:console] to=${identity.email} ${body}`);
     const replay = appointment.createdAt.getTime() < requestedAt - 1500;
     if (replay) {
       const saved = await salon.db.appointment.findUnique({
@@ -232,12 +251,12 @@ export async function bookAppointment(input: {
       }
     }
     try {
-      const sent = await dispatchSms(parsed.data.phone, body);
-      await recordSms(salon.db, { tenantId: salon.id, to: parsed.data.phone, body, provider: sent.name, providerId: sent.providerId });
+      const sent = await dispatchSms(identity.phone, body);
+      await recordSms(salon.db, { tenantId: salon.id, to: identity.phone, body, provider: sent.name, providerId: sent.providerId });
     } catch (error) {
       await recordSms(salon.db, {
         tenantId: salon.id,
-        to: parsed.data.phone,
+        to: identity.phone,
         body,
         provider: "console",
         status: "FAILED",

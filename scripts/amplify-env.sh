@@ -18,12 +18,15 @@ if [ -z "${PLATFORM_DATABASE_URL:-}" ]; then
   echo "Set PLATFORM_DATABASE_URL or DATABASE_URL_SECRET_ID on the Amplify app." >&2
   exit 1
 fi
-# Aurora Serverless can pause when idle and needs ~15 seconds to resume. Wait for it.
-case "$PLATFORM_DATABASE_URL" in
-  *connect_timeout=*) ;;
-  *\?*) PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL}&connect_timeout=30" ;;
-  *) PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL}?connect_timeout=30" ;;
-esac
+# Aurora Serverless pauses when idle. Resume can take longer than Prisma's
+# default 10s pool wait, which is what turned the first page into a 500.
+for param in connect_timeout pool_timeout; do
+  case "$PLATFORM_DATABASE_URL" in
+    *"${param}="*) ;;
+    *\?*) PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL}&${param}=30" ;;
+    *) PLATFORM_DATABASE_URL="${PLATFORM_DATABASE_URL}?${param}=30" ;;
+  esac
+done
 export PLATFORM_DATABASE_URL
 export TENANT_DATABASE_URL="${TENANT_DATABASE_URL:-$PLATFORM_DATABASE_URL}"
 export TENANT_ADMIN_URL="${TENANT_ADMIN_URL:-$(printf '%s' "$PLATFORM_DATABASE_URL" | sed -E 's#/[^/?]+(\?|$)#/postgres\1#')}"

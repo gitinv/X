@@ -9,7 +9,7 @@ const customerLinks = [
   { href: "/services", label: "Services" },
   { href: "/book", label: "Book" },
   { href: "/shop", label: "Shop" },
-  { href: "/account", label: "Visits" },
+  { href: "/account", label: "My visits" },
 ];
 
 export function CustomerShell({

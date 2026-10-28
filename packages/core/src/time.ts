@@ -128,6 +128,28 @@ export function weekdayOfDate(date: string): number {
   return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay();
 }
 
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export function weekdayName(dayOfWeek: number) {
+  return WEEKDAYS[dayOfWeek] ?? "that day";
+}
+
+export function closedDaySentence(studio: string, dayOfWeek: number) {
+  const name = weekdayName(dayOfWeek);
+  return `${studio} is closed on ${name.endsWith("s") ? `${name}es` : `${name}s`}.`;
+}
+
+export function studioHoursSummary(hours: { dayOfWeek: number; openMin: number; closeMin: number; closed: boolean }[]) {
+  return [...hours]
+    .sort((left, right) => left.dayOfWeek - right.dayOfWeek)
+    .map((row) =>
+      row.closed
+        ? `${weekdayName(row.dayOfWeek).slice(0, 3)} closed`
+        : `${weekdayName(row.dayOfWeek).slice(0, 3)} ${formatWallClock(row.openMin)}–${formatWallClock(row.closeMin)}`,
+    )
+    .join(" · ");
+}
+
 export function startFitsOpenWindow(startMin: number, durationMin: number, openMin: number, closeMin: number, closed: boolean) {
   if (closed || durationMin <= 0) return false;
   return startMin >= openMin && startMin + durationMin <= closeMin;

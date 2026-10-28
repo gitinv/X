@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GET } from "../app/api/pwa/manifest/route";
 import { demoHints } from "./demo-accounts";
 import { SESSION_COOKIE, sessionCookieOptions } from "./auth/token";
+import { readManageToken, signManageToken } from "./manage-token";
 
 describe("public routes", () => {
   it("GET /api/pwa/manifest points at the real manifest", async () => {
@@ -26,5 +27,12 @@ describe("public routes", () => {
     expect(cleared).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 0 });
     expect(SESSION_COOKIE).toBe("redlady_session");
     expect(sessionCookieOptions(60).maxAge).toBe(60);
+  });
+
+  it("signs a manage link that opens only that visit", async () => {
+    process.env.AUTH_SECRET = "dev-only-change-me-red-lady-spa-2026";
+    const token = await signManageToken({ appointmentId: "visit-1", tenantId: "salon-1" });
+    expect(await readManageToken(token)).toEqual({ appointmentId: "visit-1", tenantId: "salon-1" });
+    expect(await readManageToken(`${token}x`)).toBeNull();
   });
 });

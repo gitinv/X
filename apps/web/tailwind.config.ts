@@ -7,7 +7,7 @@ const config: Config = {
       colors: {
         cream: "#F7F3EE",
         ink: "#1C1412",
-        bark: "#8C8279",
+        bark: "#4A433C",
         line: "#E6DFD6",
         wine: "#4A1219",
         gold: "#C4A484",

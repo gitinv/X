@@ -3,9 +3,10 @@
 import { bookAppointment, loadAlternates, loadSlots } from "@/app/book/actions";
 import { buttonClass } from "@/components/ui";
 import { FavoriteToggle } from "@/components/favorite-mark";
+import { SignOutButton } from "@/components/sign-out-button";
 import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal } from "@/components/service-tiles";
-import { formatCents, formatTime, formatWallClock, reservedMinutes, serviceGroup, sortByFavorite, toggleBookedService, uniqueStartSlots, weekdayOfDate, type AlternateLocation } from "@redlady/core";
+import { bookingFieldErrors, closedDaySentence, formatCents, formatTime, formatWallClock, formatWhen, reservedMinutes, serviceGroup, sortByFavorite, studioHoursSummary, toggleBookedService, uniqueStartSlots, weekdayOfDate, type AlternateLocation, type BookingFieldErrors } from "@redlady/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -51,6 +52,46 @@ function LinkHint() {
   return <>Sign in to save favorite techs.</>;
 }
 
+function SlotChoices({
+  slots,
+  startIso,
+  onPick,
+}: {
+  slots: { startIso: string; label: string; technicianId: string }[];
+  startIso: string;
+  onPick: (slot: { startIso: string; technicianId: string }) => void;
+}) {
+  const [cursor, setCursor] = useState(0);
+  if (slots.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Open times">
+      {slots.map((slot, index) => {
+        const selected = startIso === slot.startIso;
+        return (
+          <button
+            key={slot.startIso}
+            type="button"
+            data-roving="slot"
+            tabIndex={index === cursor ? 0 : -1}
+            aria-pressed={selected}
+            onClick={() => onPick(slot)}
+            onKeyDown={(event) => {
+              if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === "Home" ? 0 : event.key === "End" ? slots.length - 1 : event.key === "ArrowRight" ? (index + 1) % slots.length : (index - 1 + slots.length) % slots.length;
+              setCursor(next);
+              event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[data-roving='slot']")[next]?.focus();
+            }}
+            className={buttonClass(selected ? "solid" : "ghost", "min-h-11 px-3")}
+          >
+            {slot.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function BookingPending() {
   return (
     <span className="inline-flex items-center gap-2">
@@ -82,9 +123,10 @@ export function BookingWizard({
   presetTechnicianId,
   presetLocationSlug,
   suggestNearest,
-  guest,
+  account,
   favoriteIds,
   signedIn,
+  today,
 }: {
   services: ServiceChoice[];
   technicians: TechChoice[];
@@ -95,9 +137,10 @@ export function BookingWizard({
   presetTechnicianId?: string;
   presetLocationSlug: string;
   suggestNearest: boolean;
-  guest: { name: string; phone: string; email: string } | null;
+  account: { name: string; phone: string; email: string } | null;
   favoriteIds: string[];
   signedIn: boolean;
+  today: string;
 }) {
   const router = useRouter();
   const [locationSlug, setLocationSlug] = useState(presetLocationSlug);
@@ -115,12 +158,15 @@ export function BookingWizard({
   const [alternates, setAlternates] = useState<AlternateLocation[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [startIso, setStartIso] = useState("");
-  const [name, setName] = useState(guest?.name ?? "");
-  const [phone, setPhone] = useState(guest?.phone ?? "");
-  const [email, setEmail] = useState(guest?.email ?? "");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [pending, setPending] = useState(false);
+  const [slotRefresh, setSlotRefresh] = useState(0);
+  const alertRef = useRef<HTMLDivElement>(null);
   const [pendingAlternate, setPendingAlternate] = useState<{ locationSlug: string; locationName: string; technicianId: string; technicianName: string; startIso: string; label: string } | null>(null);
   const [starred, setStarred] = useState<string[]>(favoriteIds);
   const orderSnapshot = useRef(favoriteIds);
@@ -144,7 +190,12 @@ export function BookingWizard({
   }, [router, suggestNearest]);
 
   useEffect(() => {
-    if (selectedIds.length === 0 || !date || !location) return;
+    if (selectedIds.length === 0 || !date || !location || date < today) {
+      setSlots([]);
+      setAlternates([]);
+      setLoadingSlots(false);
+      return;
+    }
     let cancel = false;
     setLoadingSlots(true);
     setStartIso("");
@@ -162,7 +213,7 @@ export function BookingWizard({
     return () => {
       cancel = true;
     };
-  }, [selectedIds, technician, date, location]);
+  }, [selectedIds, technician, date, location, today, slotRefresh]);
 
   async function submit(choice?: { locationSlug: string; technicianId: string; startIso: string; technicianName: string }) {
     if (bookingLock.current || selectedIds.length === 0) return;
@@ -170,6 +221,15 @@ export function BookingWizard({
     const chosenTech = choice?.technicianId ?? technician?.id ?? slotTechId;
     const chosenStart = choice?.startIso ?? startIso;
     if (!chosenLocation || !chosenStart || selectedIds.length === 0) return;
+    const visitDate = new Intl.DateTimeFormat("en-CA", { timeZone: location?.timezone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(chosenStart));
+    if (!signedIn) {
+      const fields = bookingFieldErrors({ name, phone, email, date: visitDate, today });
+      setFieldErrors(fields);
+      if (fields.name || fields.phone || fields.email || fields.date) {
+        setError("");
+        return;
+      }
+    }
     bookingLock.current = true;
     setPending(true);
     setError("");
@@ -179,14 +239,19 @@ export function BookingWizard({
         technicianId: chosenTech,
         locationSlug: chosenLocation,
         startIso: chosenStart,
-        name,
-        phone,
-        email,
+        name: signedIn ? account?.name ?? "" : name,
+        phone: signedIn ? account?.phone ?? "" : phone,
+        email: signedIn ? account?.email ?? "" : email,
         notes,
         idempotencyKey: idempotencyKey.current,
       });
       if (!result.ok) {
-        setError(result.error);
+        setFieldErrors(result.fields ?? {});
+        setError(result.fields && (result.fields.name || result.fields.phone || result.fields.email || result.fields.date) ? "" : result.error);
+        if (result.error === "That time is no longer available.") {
+          setStartIso("");
+          setSlotRefresh((value) => value + 1);
+        }
         return;
       }
       router.push(`/book/confirmation/${result.reference}`);
@@ -196,8 +261,16 @@ export function BookingWizard({
     }
   }
 
+  useEffect(() => {
+    if (error || pendingAlternate) alertRef.current?.scrollIntoView({ block: "center" });
+  }, [error, pendingAlternate]);
+
   const hoursToday = location?.hours.find((row) => row.dayOfWeek === weekdayOfDate(date));
-  const closing = !hoursToday || hoursToday.closed ? `${location?.name ?? "This studio"} is closed that day.` : `${location?.name ?? "This studio"} is open until ${formatWallClock(hoursToday.closeMin)}. A time is offered only when the whole visit ends by closing, and by the end of that technician's shift.`;
+  const closing = !hoursToday
+    ? ""
+    : hoursToday.closed
+      ? closedDaySentence(location?.name ?? "This studio", hoursToday.dayOfWeek)
+      : `${location?.name ?? "This studio"} is open until ${formatWallClock(hoursToday.closeMin)}. A time is offered only when the whole visit ends by closing, and by the end of that technician's shift.`;
   const finishLabel = startIso && blockMinutes > 0 && location ? formatTime(new Date(new Date(startIso).getTime() + blockMinutes * 60_000), location.timezone) : "";
 
   return (
@@ -205,7 +278,7 @@ export function BookingWizard({
       <section className="space-y-6">
         <div>
           <h1 className="font-serif text-5xl italic leading-none text-wine">Reserve a chair</h1>
-          <p className="mt-3 text-sm text-bark">Pick a manicure, a pedicure, and any aura add-ons. One technician keeps the whole block, back to back. If that chair is full, nearby studios appear below.</p>
+          <p className="mt-3 text-sm text-bark">Pick a manicure, a pedicure, and aura nail art. Your technician will do these services back to back. If that chair is full, nearby studios appear below.</p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {locations.map((item) => (
@@ -216,10 +289,11 @@ export function BookingWizard({
                 setLocationSlug(item.slug);
                 setTechnician(null);
               }}
-              className={`rounded-3xl border p-4 text-left ${location?.id === item.id ? "border-ink bg-white shadow-card" : "border-line bg-white/70"}`}
+              className={`min-h-11 rounded-3xl border p-4 text-left ${ (pendingAlternate ? locations.find((studio) => studio.slug === pendingAlternate.locationSlug)?.id : location?.id) === item.id ? "border-ink bg-white shadow-card" : "border-line bg-white/70"}`}
             >
               <span className="block font-medium">{item.name}</span>
               <span className="mt-1 block text-sm text-bark">{item.address}</span>
+              <span className="mt-2 block text-xs text-bark">{studioHoursSummary(item.hours)}</span>
             </button>
           ))}
         </div>
@@ -227,7 +301,7 @@ export function BookingWizard({
           {["Manicure", "Pedicure", "Aura", ...[...new Set(visibleServices.map((item) => serviceGroup(item)))].filter((group) => !["Manicure", "Pedicure", "Aura", "More"].includes(group)).sort(), "More"].map((group) => (
             <ServiceTiles
               key={group}
-              title={group === "Aura" ? "Aura add-ons" : group === "More" ? "More services" : group}
+              title={group === "Aura" ? "Aura nail art" : group === "More" ? "Other services" : group}
               items={visibleServices
                 .filter((item) => serviceGroup(item) === group)
                 .map((item) => ({ id: item.id, name: item.name, priceCents: item.priceCents, durationMin: reservedMinutes(item) }))}
@@ -255,7 +329,7 @@ export function BookingWizard({
           {orderedTechs.map((item) => {
             const favorite = starred.includes(item.id);
             return (
-              <div key={item.id} className={`rounded-2xl p-3 text-left ${favoriteCardClass(favorite)} ${technician?.id === item.id ? "ring-2 ring-ink" : ""}`}>
+              <div key={item.id} className={`rounded-2xl p-3 text-left ${favoriteCardClass(favorite)} ${technician?.id === item.id ? "bg-cream" : ""}`}>
                 <span className="flex items-start justify-between gap-1">
                   <button type="button" onClick={() => setTechnician(item)} className="min-w-0 flex-1 text-left">
                     {item.avatarUrl ? <img src={item.avatarUrl} alt="" className="mb-2 h-16 w-16 rounded-full object-cover" /> : null}
@@ -277,20 +351,17 @@ export function BookingWizard({
         </div>
         <label className="block text-sm">
           <span className="mb-1 block text-bark">Date</span>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <input type="date" min={today} value={date} aria-invalid={fieldErrors.date ? true : undefined} aria-describedby={fieldErrors.date ? "date-error" : undefined} onChange={(event) => { setDate(event.target.value); setFieldErrors((current) => ({ ...current, date: undefined })); }} />
+          {fieldErrors.date ? <span id="date-error" className="mt-1 block text-sm text-wine">{fieldErrors.date}</span> : null}
         </label>
         <p className="text-sm text-bark">{closing}</p>
         <div className="flex flex-wrap gap-2">
-          {loadingSlots ? <p className="text-sm text-bark">Checking the book…</p> : null}
-          {!loadingSlots && selectedIds.length > 0 && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
-          {(technician ? slots : uniqueStartSlots(slots)).map((slot) => {
-            const selected = startIso === slot.startIso;
-            return (
-              <button key={slot.startIso} type="button" aria-pressed={selected} onClick={() => { setStartIso(slot.startIso); setSlotTechId(technician ? slot.technicianId : ""); }} className={buttonClass(selected ? "solid" : "ghost", selected ? "px-3 py-2 ring-2 ring-ink ring-offset-2" : "px-3 py-2")}>
-                {slot.label}
-              </button>
-            );
-          })}
+          {selectedIds.length === 0 ? <p className="text-sm text-bark">Choose a service to see times.</p> : null}
+          {loadingSlots ? <p className="text-sm text-bark">Looking up open times…</p> : null}
+          {!loadingSlots && selectedIds.length > 0 && date < today ? <p className="text-sm text-wine">Pick today or a later date</p> : null}
+          {!loadingSlots && selectedIds.length > 0 && date >= today && hoursToday?.closed ? <p className="text-sm text-bark">{closedDaySentence(location?.name ?? "This studio", hoursToday.dayOfWeek)}</p> : null}
+          {!loadingSlots && selectedIds.length > 0 && date >= today && hoursToday && !hoursToday.closed && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
+          {selectedIds.length > 0 ? <SlotChoices slots={technician ? slots : uniqueStartSlots(slots)} startIso={startIso} onPick={(slot) => { setStartIso(slot.startIso); setSlotTechId(technician ? slot.technicianId : ""); }} /> : null}
         </div>
         {alternates.length > 0 ? (
           <div className="rounded-2xl bg-cream p-3">
@@ -331,10 +402,23 @@ export function BookingWizard({
           </div>
         ) : null}
         {pendingAlternate ? (
-          <div className="rounded-2xl border-2 border-gold bg-cream p-3 text-sm">
-            <p>
-              Book {chosen.map((item) => item.name).join(", ")} at {pendingAlternate.locationName} with {pendingAlternate.technicianName} at {pendingAlternate.label}?
-            </p>
+          <div ref={alertRef} className="rounded-2xl border-2 border-gold-deep bg-cream p-3 text-sm">
+            {(() => {
+              const studio = locations.find((item) => item.slug === pendingAlternate.locationSlug);
+              const priced = services.flatMap((service) => {
+                if (!selectedIds.includes(service.id)) return [];
+                const offer = offerAt(service, studio?.id, offers);
+                return offer ? [offer] : [];
+              });
+              const price = priced.reduce((sum, item) => sum + item.priceCents, 0);
+              const minutes = priced.reduce((sum, item) => sum + reservedMinutes(item), 0);
+              const when = studio ? formatWhen(new Date(pendingAlternate.startIso), studio.timezone) : pendingAlternate.label;
+              return (
+                <p>
+                  Book {priced.map((item) => item.name).join(", ")} at {pendingAlternate.locationName} on {when} with {pendingAlternate.technicianName}. {formatCents(price)} · {minutes} min · {pendingAlternate.label}.
+                </p>
+              );
+            })()}
             <div className="mt-2 flex gap-2">
               <button type="button" className={buttonClass("solid")} disabled={pending} aria-busy={pending} onClick={() => void submit(pendingAlternate)}>
                 {pending ? <BookingPending /> : "Confirm booking"}
@@ -343,23 +427,34 @@ export function BookingWizard({
             </div>
           </div>
         ) : null}
-        <label className="block text-sm">
-          <span className="mb-1 block text-bark">Name</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-bark">Phone</span>
-          <input value={phone} onChange={(event) => setPhone(event.target.value)} required />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block text-bark">Email</span>
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-        </label>
+        {signedIn && account ? (
+          <p className="text-sm">
+            Booking as {account.name}. <SignOutButton className="underline" label="Not you? Sign out" />
+          </p>
+        ) : (
+          <>
+            <label className="block text-sm">
+              <span className="mb-1 block text-bark">Name</span>
+              <input value={name} aria-invalid={fieldErrors.name ? true : undefined} aria-describedby={fieldErrors.name ? "name-error" : undefined} onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} required />
+              {fieldErrors.name ? <span id="name-error" className="mt-1 block text-sm text-wine">{fieldErrors.name}</span> : null}
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-bark">Phone</span>
+              <input type="tel" inputMode="numeric" autoComplete="tel" value={phone} aria-invalid={fieldErrors.phone ? true : undefined} aria-describedby={fieldErrors.phone ? "phone-error" : undefined} onChange={(event) => { setPhone(event.target.value); setFieldErrors((current) => ({ ...current, phone: undefined })); }} required />
+              {fieldErrors.phone ? <span id="phone-error" className="mt-1 block text-sm text-wine">{fieldErrors.phone}</span> : null}
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-bark">Email</span>
+              <input type="email" autoComplete="email" value={email} aria-invalid={fieldErrors.email ? true : undefined} aria-describedby={fieldErrors.email ? "email-error" : undefined} onChange={(event) => { setEmail(event.target.value); setFieldErrors((current) => ({ ...current, email: undefined })); }} required />
+              {fieldErrors.email ? <span id="email-error" className="mt-1 block text-sm text-wine">{fieldErrors.email}</span> : null}
+            </label>
+          </>
+        )}
         <label className="block text-sm">
           <span className="mb-1 block text-bark">Notes</span>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
         </label>
-        {error ? <p className="text-sm text-wine">{error}</p> : null}
+        {error ? <p ref={pendingAlternate ? undefined : alertRef} className="text-sm text-wine" role="alert">{error}</p> : null}
         <button type="button" className={buttonClass("solid", "w-full")} disabled={pending || selectedIds.length === 0 || !startIso} aria-busy={pending} onClick={() => void submit()}>
           {pending ? <BookingPending /> : "Book appointment"}
         </button>

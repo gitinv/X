@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export function buttonClass(variant: "solid" | "ghost" | "light" = "solid", className = "") {
-  const base = "inline-flex items-center justify-center rounded-full px-4 py-2.5 text-sm font-medium transition disabled:opacity-50";
+  const base = "inline-flex min-h-11 items-center justify-center rounded-full px-4 py-2.5 text-sm font-medium transition disabled:opacity-50";
   const styles = {
     solid: "bg-[var(--brand,#7A1F2B)] text-white hover:opacity-90",
     ghost: "border border-line bg-white text-ink hover:border-ink",

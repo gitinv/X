@@ -313,7 +313,7 @@ async function main() {
       name: "The Red Lady Spa",
       tagline: "Sculpting luxury at your fingertips",
       about:
-        "Medical-grade Russian manicures, hand-painted gel, and restorative paraffin care. Studios in Chantilly, Fairfax, and Reston share one client book. The address and hours are sample content — change them in the owner portal.",
+        "Medical-grade Russian manicures, hand-painted gel, and restorative paraffin care. Studios in Chantilly, Fairfax, and Reston share one client book.",
       phone: "(703) 555-0148",
       email: "hello@redladyspa.com",
       address: "100 Demo Plaza, Chantilly, VA 20151",

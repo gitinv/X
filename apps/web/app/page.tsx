@@ -1,7 +1,7 @@
 import { CustomerFrame } from "@/components/customer-frame";
 import { buttonClass } from "@/components/ui";
 import { pricedServices } from "@/lib/offers";
-import { formatCents } from "@redlady/core";
+import { customerFacingAbout, formatCents, studioHoursSummary } from "@redlady/core";
 import Link from "next/link";
 import { getPublicTenant } from "@/lib/tenant";
 
@@ -25,9 +25,9 @@ export default async function HomePage() {
   return (
     <CustomerFrame>
       <section className="overflow-hidden rounded-[2rem] bg-wine px-6 py-10 text-cream shadow-card md:px-10">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-gold">Nail studio</p>
+        <p className="text-[11px] uppercase tracking-[0.22em] text-gold">{tenant.location.name}</p>
         <h1 className="mt-3 max-w-xl font-serif text-5xl italic leading-[0.95] md:text-7xl">{tenant.tagline}</h1>
-        <p className="mt-5 max-w-xl text-sm leading-6 text-cream/80">{tenant.about}</p>
+        <p className="mt-5 max-w-xl text-sm leading-6 text-cream/80">{customerFacingAbout(tenant.about)}</p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Link href="/book" className={buttonClass("light")}>
             Reserve a chair
@@ -44,6 +44,7 @@ export default async function HomePage() {
             <p className="text-[10px] uppercase tracking-[0.16em] text-bark">Studio</p>
             <p className="mt-1 font-medium">{location.name}</p>
             <p className="text-sm text-bark">{location.address}</p>
+            <p className="mt-2 text-xs text-bark">{studioHoursSummary(location.hours)}</p>
           </Link>
         ))}
       </section>

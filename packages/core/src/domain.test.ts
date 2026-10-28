@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { canAccessLocation, effectiveOffer, locationCharge, rankAlternateLocations } from "./locations";
 import { canCaptureServicePhoto, canSoftDeletePhoto, canViewServicePhoto } from "./photos";
 import { shouldCacheForOffline } from "./pwa";
-import { cancellationPolicyText, canCustomerCancel, findBookingConflict, sortCustomerVisits } from "./booking";
+import { bookingFieldErrors, cancellationPolicyText, canCustomerCancel, customerFacingAbout, findBookingConflict, resolveBookingIdentity, sortCustomerVisits } from "./booking";
 import { InventoryError, planInventoryDecrement } from "./inventory";
 import { dollarsToCents, formatClock, parseClock } from "./money";
 import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
 import { canEditFavorites, favoriteCardClass, favoriteNote, normalizePhone, samePhone, sortByFavorite } from "./favorites";
-import { formatDateTimeLocal, formatTimeRange, formatWallClock, listOpenSlots, nextDateKey, startFitsOpenWindow, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
+import { closedDaySentence, formatDateTimeLocal, formatTimeRange, formatWallClock, listOpenSlots, nextDateKey, startFitsOpenWindow, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
 import { assertSingleCoreServices, blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary, toggleBookedService, uniqueStartSlots } from "./ticket";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
@@ -90,6 +90,26 @@ describe("booking conflicts", () => {
     expect(canCustomerCancel(start, at("2026-06-02T15:00:00Z"), 2)).toBe(true);
     expect(canCustomerCancel(start, at("2026-06-02T16:30:00Z"), 2)).toBe(false);
     expect(canCustomerCancel(start, at("2026-06-02T16:00:00Z"), 2)).toBe(true);
+    expect(bookingFieldErrors({ name: "", phone: "555", email: "nope", date: "2026-10-01", today: "2026-10-28" })).toEqual({
+      name: "Enter your name",
+      phone: "Enter a 10-digit phone number",
+      email: "Enter a valid email",
+      date: "Pick today or a later date",
+    });
+    expect(bookingFieldErrors({ name: "Ada", phone: "555-010-0199", email: "ada@example.com", date: "2026-10-29", today: "2026-10-28" })).toEqual({});
+    const asAva = resolveBookingIdentity({
+      signedIn: { id: "ava", name: "Ava Chen", email: "ava@redladyspa.com", phone: "7035550100" },
+      entered: { name: "Test Customer", email: "test+uat@example.com", phone: "555-010-0199" },
+    });
+    expect(asAva).toEqual({ mode: "self", clientId: "ava", name: "Ava Chen", email: "ava@redladyspa.com", phone: "7035550100" });
+    const asGuest = resolveBookingIdentity({
+      signedIn: null,
+      entered: { name: "Test Customer", email: "test+uat@example.com", phone: "555-010-0199" },
+    });
+    expect(asGuest.clientId).toBeNull();
+    expect(asGuest.email).toBe("test+uat@example.com");
+    expect(customerFacingAbout("Care. The address and hours are sample content — change them in the owner portal.")).toBe("Care.");
+    expect(closedDaySentence("Fairfax", 0)).toBe("Fairfax is closed on Sundays.");
   });
 });
 
@@ -425,6 +445,7 @@ describe("tickets, shifts, and favorites", () => {
     expect(requireServiceMinutes(30, -1).ok).toBe(false);
     expect(requireServiceMinutes(30, 5)).toEqual({ ok: true, reservedMin: 35 });
     expect(serviceGroup({ category: "Aura", kind: "ADDON" })).toBe("Aura");
+    expect(["Aura gradient", "Aura chrome", "Aura airbrush"].map(() => serviceGroup({ category: "Aura", kind: "ADDON" }))).toEqual(["Aura", "Aura", "Aura"]);
     expect(serviceGroup({ category: "Finish", kind: "ADDON" })).toBe("Finish");
     expect(uniqueStartSlots([{ startIso: "a", technicianId: "1" }, { startIso: "a", technicianId: "2" }, { startIso: "b", technicianId: "1" }])).toEqual([
       { startIso: "a", technicianId: "1" },

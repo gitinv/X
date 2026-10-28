@@ -1,3 +1,5 @@
+import { normalizePhone } from "./favorites";
+
 export const BLOCKING_APPOINTMENT_STATUSES = ["BOOKED", "CHECKED_IN", "IN_SERVICE"] as const;
 
 export type BlockingStatus = (typeof BLOCKING_APPOINTMENT_STATUSES)[number];
@@ -53,6 +55,48 @@ export function cancellationPolicyText(windowHours: number, latePolicy?: string 
 }
 
 const UPCOMING_VISIT_STATUSES = new Set(["BOOKED", "CHECKED_IN", "IN_SERVICE"]);
+
+export interface BookingFieldErrors {
+  name?: string;
+  phone?: string;
+  email?: string;
+  date?: string;
+}
+
+export function bookingFieldErrors(input: { name: string; phone: string; email: string; date: string; today: string }): BookingFieldErrors {
+  const fields: BookingFieldErrors = {};
+  if (input.name.trim().length < 2) fields.name = "Enter your name";
+  if (normalizePhone(input.phone).length !== 10) fields.phone = "Enter a 10-digit phone number";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) fields.email = "Enter a valid email";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || input.date < input.today) fields.date = "Pick today or a later date";
+  return fields;
+}
+
+export function resolveBookingIdentity(input: {
+  signedIn: { id: string; name: string; email: string | null; phone: string | null } | null;
+  entered: { name: string; email: string; phone: string };
+}) {
+  if (input.signedIn) {
+    return {
+      mode: "self" as const,
+      clientId: input.signedIn.id,
+      name: input.signedIn.name,
+      email: (input.signedIn.email ?? "").trim().toLowerCase(),
+      phone: (input.signedIn.phone ?? "").trim(),
+    };
+  }
+  return {
+    mode: "guest" as const,
+    clientId: null,
+    name: input.entered.name.trim(),
+    email: input.entered.email.trim().toLowerCase(),
+    phone: input.entered.phone.trim(),
+  };
+}
+
+export function customerFacingAbout(about: string) {
+  return about.replace(/\s*The address and hours are sample content\s*[—-]\s*change them in the owner portal\.?/gi, "").replace(/\s{2,}/g, " ").trim();
+}
 
 export function sortCustomerVisits<T extends { startAt: Date; status: string }>(visits: T[], now: Date) {
   const upcoming = (visit: T) => UPCOMING_VISIT_STATUSES.has(visit.status) && visit.startAt.getTime() >= now.getTime();

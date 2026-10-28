@@ -1,5 +1,5 @@
 import { distanceKm } from "@redlady/core";
-import { getTenantClient, platform, resolveTenantUrl, type TenantClient } from "@redlady/db";
+import { getTenantClient, platform, resetConnections, resolveTenantUrl, withDatabaseRetry, type TenantClient } from "@redlady/db";
 import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken } from "./auth/token";
 
@@ -87,6 +87,13 @@ function nearestLocation(locations: SalonLocation[], near: { latitude: number; l
 }
 
 export async function getPublicTenant(preference?: {
+  locationSlug?: string | null;
+  near?: { latitude: number; longitude: number } | null;
+}): Promise<PublicSalon | null> {
+  return withDatabaseRetry(() => loadPublicTenant(preference), { beforeRetry: resetConnections });
+}
+
+async function loadPublicTenant(preference?: {
   locationSlug?: string | null;
   near?: { latitude: number; longitude: number } | null;
 }): Promise<PublicSalon | null> {

@@ -303,6 +303,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <label className="block text-sm">Salon name<input name="name" defaultValue={user.salon.name} /></label>
           <label className="block text-sm">Tagline<input name="tagline" defaultValue={user.salon.tagline} /></label>
           <label className="block text-sm">About<textarea name="about" rows={4} defaultValue={user.salon.about} /></label>
+          <p className="text-sm text-bark">Sample note for the owner: the address and hours in the demo are sample content. Change them here. Customers do not see this sentence.</p>
           <label className="block text-sm">Brand color<input name="brandColor" defaultValue={user.salon.brandColor} /></label>
           <label className="block text-sm">Cancellation window (hours)<input name="cancellationWindowHours" defaultValue={user.salon.cancellationWindowHours} /></label>
           <label className="block text-sm">After the window<textarea name="cancellationLatePolicy" rows={2} defaultValue={user.salon.cancellationLatePolicy} /></label>

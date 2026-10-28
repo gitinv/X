@@ -1,4 +1,4 @@
-export { evictTenant, getTenantClient, pgClientConfig, platform, urlForDatabase, withPoolLimit } from "./clients";
+export { DatabaseWakingError, evictTenant, getTenantClient, isDatabaseWaking, pgClientConfig, platform, resetConnections, urlForDatabase, withDatabaseRetry, withPoolLimit } from "./clients";
 export { PrismaClient as PlatformClient } from "./generated/platform";
 export type { PlatformUser, Tenant as RegistryTenant } from "./generated/platform";
 export { Prisma, PrismaClient as TenantClient } from "./generated/tenant";

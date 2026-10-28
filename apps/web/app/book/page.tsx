@@ -10,7 +10,7 @@ export const metadata = { title: "Book" };
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string; services?: string; tech?: string; location?: string; near?: string }>;
+  searchParams: Promise<{ service?: string; services?: string; tech?: string; location?: string; near?: string; date?: string }>;
 }) {
   const params = await searchParams;
   const jar = await cookies();
@@ -34,7 +34,8 @@ export default async function BookPage({
     session?.clientId ? salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id }, include: { favorites: true } }) : Promise.resolve(null),
     salon.db.serviceLocation.findMany({ where: { tenantId: salon.id } }),
   ]);
-  const tomorrow = zonedDayKey(new Date(Date.now() + 24 * 60 * 60 * 1000), salon.location.timezone);
+  const today = zonedDayKey(new Date(), salon.location.timezone);
+  const requestedDate = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : today;
   return (
     <CustomerFrame>
       <BookingWizard
@@ -72,12 +73,13 @@ export default async function BookPage({
           durationMin: offer.durationMin,
           bufferMin: offer.bufferMin,
         }))}
-        initialDate={tomorrow}
+        initialDate={requestedDate}
+        today={today}
         presetServiceIds={(params.services ?? params.service ?? "").split(",").map((id) => id.trim()).filter(Boolean)}
         presetTechnicianId={params.tech}
         presetLocationSlug={salon.location.slug}
         suggestNearest={!params.location && !params.near && !hasCookie && !client?.lastLocationId}
-        guest={client ? { name: client.name, phone: client.phone ?? "", email: client.email ?? "" } : null}
+        account={client ? { name: client.name, phone: client.phone ?? "", email: client.email ?? "" } : null}
         favoriteIds={client?.favorites.map((favorite) => favorite.technicianId) ?? []}
         signedIn={Boolean(client)}
       />
