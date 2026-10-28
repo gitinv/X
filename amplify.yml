@@ -12,6 +12,7 @@ applications:
             - cd "$(git rev-parse --show-toplevel)" && pnpm db:generate
             - cd "$(git rev-parse --show-toplevel)" && pnpm db:deploy
             - cd "$(git rev-parse --show-toplevel)" && pnpm migrate:all
+            - cd "$(git rev-parse --show-toplevel)" && pnpm db:seed
         build:
           commands:
             - cd "$(git rev-parse --show-toplevel)" && pnpm --filter web build
