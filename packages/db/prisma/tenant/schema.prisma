@@ -1,0 +1,581 @@
+// One physical database per salon. tenantId is repeated on every row
+// so a query still has to name its salon. This is the tenant schema (tenant.prisma).
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../src/generated/tenant"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("TENANT_DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  TECHNICIAN
+  FRONT_DESK
+  MANAGER
+  OWNER
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CHECKED_IN
+  IN_SERVICE
+  READY
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  PARTIAL
+  REFUNDED
+}
+
+enum ServiceKind {
+  SERVICE
+  ADDON
+}
+
+enum OrderStatus {
+  OPEN
+  PAID
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TAP
+}
+
+enum ProductCategory {
+  POLISH
+  CARE
+  ART
+  TOOLS
+}
+
+enum SmsStatus {
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum PhotoLabel {
+  BEFORE
+  AFTER
+  OTHER
+}
+
+model SalonProfile {
+  tenantId                String  @id
+  name                    String
+  tagline                 String
+  about                   String
+  phone                   String
+  email                   String
+  address                 String
+  brandColor              String  @default("#7A1F2B")
+  accentColor             String  @default("#C4A484")
+  timezone                String  @default("America/New_York")
+  cancellationWindowHours Int     @default(24)
+  cancellationLatePolicy  String  @default("Please call the studio.")
+  photoConsentRequired    Boolean @default(true)
+
+  users        User[]
+  hours        BusinessHour[]
+  services     Service[]
+  products     Product[]
+  technicians  Technician[]
+  clients      Client[]
+  appointments Appointment[]
+  orders       Order[]
+  smsMessages  SmsMessage[]
+  campaign     Campaign?
+  trends       Trend[]
+  photos       ServicePhoto[]
+  photoAudits  PhotoAudit[]
+  pushSubs     PushSubscription[]
+  locations    Location[]
+  assignments  StaffAssignment[]
+  shifts       Shift[]
+  audits       AuditEvent[]
+  signupCodes  SignupCode[]
+}
+
+model Location {
+  id           String   @id @default(cuid())
+  tenantId     String
+  salon        SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  slug         String
+  name         String
+  address      String
+  phone        String
+  email        String?
+  timezone     String
+  brandColor   String?
+  accentColor  String?
+  tagline      String?
+  latitude     Float?
+  longitude    Float?
+  subdomain    String?
+  customDomain String?
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  hours        BusinessHour[]
+  technicians  TechnicianLocation[]
+  services     ServiceLocation[]
+  appointments Appointment[]
+  stock        LocationStock[]
+  registers    Register[]
+  orders       Order[]
+  staff        StaffAssignment[]
+  recentClients Client[]
+  shifts       Shift[]
+
+  @@unique([tenantId, slug])
+  @@unique([tenantId, subdomain])
+  @@index([customDomain])
+}
+
+model StaffAssignment {
+  id         String       @id @default(cuid())
+  tenantId   String
+  salon      SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  locationId String
+  location   Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  role       Role
+
+  @@unique([userId, locationId])
+  @@index([tenantId, locationId])
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String
+  passwordHash String
+  role         Role
+  phone        String?
+  tenantId     String
+  salon        SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  technicianId String?     @unique
+  technician   Technician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  clientId     String?     @unique
+  client       Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  assignments  StaffAssignment[]
+
+  @@index([tenantId])
+}
+
+model BusinessHour {
+  id         String       @id @default(cuid())
+  tenantId   String
+  salon      SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  locationId String
+  location   Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  dayOfWeek  Int
+  openMin    Int
+  closeMin   Int
+  closed     Boolean      @default(false)
+
+  @@unique([locationId, dayOfWeek])
+  @@index([tenantId])
+}
+
+model Service {
+  id           String        @id @default(cuid())
+  tenantId     String
+  salon        SalonProfile  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  category     String
+  kind         ServiceKind   @default(SERVICE)
+  name         String
+  description  String
+  durationMin  Int
+  bufferMin    Int           @default(0)
+  priceCents   Int
+  supplies     String[]
+  active       Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  appointments Appointment[]
+  lines        AppointmentLine[]
+  photos       ServicePhoto[]
+  locations    ServiceLocation[]
+
+  @@index([tenantId, active])
+}
+
+model ServiceLocation {
+  id          String   @id @default(cuid())
+  tenantId    String
+  serviceId   String
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  locationId  String
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  available   Boolean  @default(true)
+  priceCents  Int?
+  durationMin Int?
+  bufferMin   Int?
+
+  @@unique([serviceId, locationId])
+  @@index([tenantId, locationId])
+}
+
+model Product {
+  id            String          @id @default(cuid())
+  tenantId      String
+  salon         SalonProfile    @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  name          String
+  category      ProductCategory
+  description   String
+  priceCents    Int
+  imageUrl      String?
+  active        Boolean         @default(true)
+  stocks        LocationStock[]
+
+  @@index([tenantId, active])
+}
+
+model LocationStock {
+  id            String   @id @default(cuid())
+  tenantId      String
+  locationId    String
+  location      Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stock         Int
+  lowStockAlert Int
+
+  @@unique([locationId, productId])
+  @@index([tenantId, locationId])
+}
+
+model Register {
+  id         String   @id @default(cuid())
+  tenantId   String
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  name       String
+  active     Boolean  @default(true)
+  orders     Order[]
+
+  @@index([tenantId, locationId])
+}
+
+model Technician {
+  id           String        @id @default(cuid())
+  tenantId     String
+  salon        SalonProfile  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  name         String
+  roleTitle    String
+  specialties  String[]
+  avatarUrl    String?
+  active       Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  user         User?
+  appointments Appointment[]
+  locations    TechnicianLocation[]
+  shifts       Shift[]
+  favorites    ClientFavorite[]
+
+  @@index([tenantId, active])
+}
+
+model TechnicianLocation {
+  id           String     @id @default(cuid())
+  tenantId     String
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  locationId   String
+  location     Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  active       Boolean    @default(true)
+
+  @@unique([technicianId, locationId])
+  @@index([tenantId, locationId])
+}
+
+model Client {
+  id                String        @id @default(cuid())
+  tenantId          String
+  salon             SalonProfile  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  name              String
+  phone             String?
+  email             String?
+  notes             String?
+  photoConsentAt    DateTime?
+  photoConsentById  String?
+  lastLocationId    String?
+  lastLocation      Location?     @relation(fields: [lastLocationId], references: [id], onDelete: SetNull)
+  user              User?
+  appointments      Appointment[]
+  orders            Order[]
+  photos            ServicePhoto[]
+  favorites         ClientFavorite[]
+
+  @@index([tenantId, email])
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  tenantId       String
+  salon          SalonProfile      @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  locationId     String
+  location       Location          @relation(fields: [locationId], references: [id])
+  clientId       String
+  client         Client            @relation(fields: [clientId], references: [id])
+  technicianId   String
+  technician     Technician        @relation(fields: [technicianId], references: [id])
+  serviceId      String
+  service        Service           @relation(fields: [serviceId], references: [id])
+  startAt        DateTime
+  endAt          DateTime
+  status         AppointmentStatus @default(BOOKED)
+  paymentStatus  PaymentStatus     @default(UNPAID)
+  notes          String?
+  reminderSentAt DateTime?
+  idempotencyKey String?
+  reference      String?           @unique
+  createdAt      DateTime          @default(now())
+  lines          AppointmentLine[]
+  orders         Order[]
+  photos         ServicePhoto[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, locationId, startAt])
+  @@index([tenantId, technicianId, startAt])
+}
+
+model Order {
+  id            String        @id @default(cuid())
+  tenantId      String
+  salon         SalonProfile  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  locationId    String
+  location      Location      @relation(fields: [locationId], references: [id])
+  registerId    String?
+  register      Register?     @relation(fields: [registerId], references: [id])
+  appointmentId String?
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id])
+  clientId      String?
+  client        Client?       @relation(fields: [clientId], references: [id])
+  status        OrderStatus   @default(PAID)
+  paymentMethod PaymentMethod
+  subtotalCents Int           @default(0)
+  discountCents Int           @default(0)
+  tipCents      Int           @default(0)
+  totalCents    Int
+  createdAt     DateTime      @default(now())
+  items         OrderItem[]
+  refunds       Refund[]
+
+  @@index([tenantId, createdAt])
+}
+
+model OrderItem {
+  id        String         @id @default(cuid())
+  orderId   String
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  name      String
+  quantity  Int
+  unitCents Int
+  kind      String
+  photos    ServicePhoto[]
+}
+
+model ClientFavorite {
+  id           String     @id @default(cuid())
+  tenantId     String
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([clientId, technicianId])
+  @@index([tenantId, clientId])
+}
+
+model SignupCode {
+  id        String       @id @default(cuid())
+  tenantId  String
+  salon     SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  email     String?
+  phone     String?
+  clientId  String?
+  codeHash  String
+  attempts  Int          @default(0)
+  expiresAt DateTime
+  createdAt DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model AppointmentLine {
+  id            String      @id @default(cuid())
+  tenantId      String
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceId     String
+  service       Service     @relation(fields: [serviceId], references: [id])
+  name          String
+  kind          ServiceKind
+  priceCents    Int
+  durationMin   Int
+  bufferMin     Int         @default(0)
+  sortOrder     Int         @default(0)
+
+  @@index([tenantId, appointmentId])
+}
+
+model Shift {
+  id           String     @id @default(cuid())
+  tenantId     String
+  salon        SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  locationId   String
+  location     Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int
+  startMin     Int
+  endMin       Int
+  active       Boolean    @default(true)
+
+  @@unique([technicianId, locationId, dayOfWeek])
+  @@index([tenantId, locationId, dayOfWeek])
+}
+
+model Refund {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountCents Int
+  reason      String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model AuditEvent {
+  id         String       @id @default(cuid())
+  tenantId   String
+  salon      SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  summary    String
+  createdAt  DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model SmsMessage {
+  id         String       @id @default(cuid())
+  tenantId   String
+  salon      SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  to         String
+  body       String
+  status     SmsStatus
+  provider   String
+  providerId String?
+  error      String?
+  createdAt  DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model Campaign {
+  id          String       @id @default(cuid())
+  tenantId    String       @unique
+  salon       SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  title       String
+  influencer  String
+  description String
+  priceCents  Int
+  imageUrl    String?
+  active      Boolean      @default(true)
+}
+
+model Trend {
+  id          String       @id @default(cuid())
+  tenantId    String
+  salon       SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  title       String
+  description String
+  rank        Int
+  imageUrl    String?
+  active      Boolean      @default(true)
+
+  @@index([tenantId, rank])
+}
+
+model ServicePhoto {
+  id            String       @id @default(cuid())
+  tenantId      String
+  salon         SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  clientId      String
+  client        Client       @relation(fields: [clientId], references: [id])
+  appointmentId String
+  appointment   Appointment  @relation(fields: [appointmentId], references: [id])
+  serviceId     String
+  service       Service      @relation(fields: [serviceId], references: [id])
+  orderItemId   String?
+  orderItem     OrderItem?   @relation(fields: [orderItemId], references: [id])
+  label         PhotoLabel
+  note          String?
+  takenAt       DateTime     @default(now())
+  uploadedById  String
+  originalKey   String
+  displayKey    String
+  thumbKey      String
+  sha256        String
+  contentType   String
+  deletedAt     DateTime?
+  deletedById   String?
+  createdAt     DateTime     @default(now())
+  audits        PhotoAudit[]
+
+  @@index([tenantId, clientId, takenAt])
+  @@index([tenantId, appointmentId])
+}
+
+model PhotoAudit {
+  id        String       @id @default(cuid())
+  tenantId  String
+  salon     SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  photoId   String
+  photo     ServicePhoto @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  action    String
+  actorId   String
+  note      String?
+  createdAt DateTime     @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model PushSubscription {
+  id        String       @id @default(cuid())
+  tenantId  String
+  salon     SalonProfile @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  userId    String
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime     @default(now())
+
+  @@unique([tenantId, endpoint])
+}

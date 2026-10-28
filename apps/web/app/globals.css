@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --brand: #7a1f2b;
+}
+
+body {
+  background: #f7f3ee;
+  color: #1c1412;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid #e6dfd6;
+  background: white;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid #1c1412;
+  outline-offset: 3px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid #1c1412;
+  outline-offset: 3px;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}

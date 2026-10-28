@@ -1,0 +1,27 @@
+version: 1
+applications:
+  - appRoot: apps/web
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - nvm use 20
+            - cd "$(git rev-parse --show-toplevel)" && npm install -g pnpm@9.15.0
+            - cd "$(git rev-parse --show-toplevel)" && pnpm install --frozen-lockfile
+            - cd "$(git rev-parse --show-toplevel)" && bash scripts/amplify-env.sh
+            - cd "$(git rev-parse --show-toplevel)" && pnpm db:generate
+            - cd "$(git rev-parse --show-toplevel)" && pnpm db:deploy
+            - cd "$(git rev-parse --show-toplevel)" && pnpm migrate:all
+            - cd "$(git rev-parse --show-toplevel)" && pnpm db:seed
+        build:
+          commands:
+            - cd "$(git rev-parse --show-toplevel)" && pnpm --filter web build
+            # Prisma looks for its engine one level above the server chunks (.next/server) on Amplify.
+            - cd "$(git rev-parse --show-toplevel)" && cp packages/db/src/generated/platform/libquery_engine-rhel-openssl-3.0.x.so.node apps/web/.next/server/
+      artifacts:
+        baseDirectory: .next
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - .next/cache/**/*

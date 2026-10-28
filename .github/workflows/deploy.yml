@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, staging]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -n "$AWS_ROLE_ARN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AWS_ROLE_ARN is not configured. Skipping deploy."
+          fi
+
+  deploy:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Start the Amplify release
+        env:
+          AMPLIFY_APP_ID: ${{ secrets.AMPLIFY_APP_ID }}
+        run: |
+          if [ -z "$AMPLIFY_APP_ID" ]; then
+            echo "Set AMPLIFY_APP_ID to the new salon app. Do not use d3axxvf73krhuf."
+            exit 1
+          fi
+          if [ "$AMPLIFY_APP_ID" = "d3axxvf73krhuf" ]; then
+            echo "Refusing to deploy the existing marketing site."
+            exit 1
+          fi
+          aws amplify start-job --app-id "$AMPLIFY_APP_ID" --branch-name "${GITHUB_REF_NAME}" --job-type RELEASE
