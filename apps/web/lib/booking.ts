@@ -1,5 +1,5 @@
-import { assertSingleCoreServices, blockFitsShift, effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, reservedMinutes, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
-import { createBooking, recordSms } from "@redlady/db";
+import { assertSingleCoreServices, blockFitsShift, effectiveOffer, formatWhen, listOpenSlots, minutesInZone, rankAlternateLocations, reservedMinutes, samePhone, zonedTimeToUtc, type AlternateLocation } from "@redlady/core";
+import { createBooking, findClientByContact, recordSms } from "@redlady/db";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
@@ -146,7 +146,14 @@ export async function bookAppointment(input: {
     });
     if (prior) {
       const names = prior.lines.length ? prior.lines.map((line) => line.name).join(", ") : prior.service.name;
-      return { ok: true as const, when: formatWhen(prior.startAt, prior.location.timezone), service: names, technician: prior.technician.name, location: prior.location.name };
+      return {
+        ok: true as const,
+        reference: prior.reference ?? prior.id,
+        when: formatWhen(prior.startAt, prior.location.timezone),
+        service: names,
+        technician: prior.technician.name,
+        location: prior.location.name,
+      };
     }
   }
   const start = new Date(parsed.data.startIso);
@@ -160,16 +167,21 @@ export async function bookAppointment(input: {
   if (!technician) return { ok: false as const, error: "Choose a technician at this location." };
   const service = chosen[0]!;
 
-  let clientId = session?.tenantId === salon.id ? session.clientId : null;
+  const email = (parsed.data.email || "").trim().toLowerCase();
+  const phone = parsed.data.phone.trim();
+  let clientId: string | null = null;
+  if (session?.tenantId === salon.id && session.clientId) {
+    const owner = await salon.db.client.findFirst({ where: { id: session.clientId, tenantId: salon.id } });
+    const emailOk = !email || owner?.email?.toLowerCase() === email;
+    const phoneOk = !phone || samePhone(owner?.phone, phone);
+    if (owner && emailOk && phoneOk) clientId = owner.id;
+  }
   if (!clientId) {
-    const email = parsed.data.email || undefined;
-    const existing = email
-      ? await salon.db.client.findFirst({ where: { tenantId: salon.id, email } })
-      : await salon.db.client.findFirst({ where: { tenantId: salon.id, phone: parsed.data.phone } });
+    const existing = await findClientByContact(salon.db, salon.id, phone, email);
     const client =
       existing ??
       (await salon.db.client.create({
-        data: { tenantId: salon.id, name: parsed.data.name, phone: parsed.data.phone, email, lastLocationId: location.id },
+        data: { tenantId: salon.id, name: parsed.data.name, phone, email: email || null, lastLocationId: location.id },
       }));
     clientId = client.id;
   }
@@ -209,7 +221,14 @@ export async function bookAppointment(input: {
       });
       if (saved) {
         const savedNames = saved.lines.length ? saved.lines.map((line) => line.name).join(", ") : saved.service.name;
-        return { ok: true as const, when: formatWhen(saved.startAt, saved.location.timezone), service: savedNames, technician: saved.technician.name, location: saved.location.name };
+        return {
+          ok: true as const,
+          reference: saved.reference ?? saved.id,
+          when: formatWhen(saved.startAt, saved.location.timezone),
+          service: savedNames,
+          technician: saved.technician.name,
+          location: saved.location.name,
+        };
       }
     }
     try {
@@ -228,7 +247,14 @@ export async function bookAppointment(input: {
     revalidatePath("/pos");
     revalidatePath("/tech");
     revalidatePath("/account");
-    return { ok: true as const, when: formatWhen(appointment.startAt, location.timezone), service: names, technician: technician.name, location: location.name };
+    return {
+      ok: true as const,
+      reference: appointment.reference ?? appointment.id,
+      when: formatWhen(appointment.startAt, location.timezone),
+      service: names,
+      technician: technician.name,
+      location: location.name,
+    };
   } catch (error) {
     return { ok: false as const, error: publicError(error) };
   }

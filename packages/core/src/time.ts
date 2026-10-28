@@ -103,6 +103,36 @@ export function formatTime(instant: Date, timeZone: string): string {
   }).format(instant);
 }
 
+export function formatTimeRange(start: Date, end: Date, timeZone: string): string {
+  const startLabel = formatTime(start, timeZone);
+  const endLabel = formatTime(end, timeZone);
+  const startMeridiem = startLabel.slice(-2);
+  const endMeridiem = endLabel.slice(-2);
+  if (startMeridiem === endMeridiem && (startMeridiem === "AM" || startMeridiem === "PM")) {
+    return `${startLabel.slice(0, -3)}–${endLabel}`;
+  }
+  return `${startLabel}–${endLabel}`;
+}
+
+export function formatWallClock(minutes: number): string {
+  const hour24 = Math.floor(minutes / 60) % 24;
+  const minute = minutes % 60;
+  const meridiem = hour24 >= 12 ? "PM" : "AM";
+  const hour = hour24 % 12 || 12;
+  return `${hour}:${String(minute).padStart(2, "0")} ${meridiem}`;
+}
+
+export function weekdayOfDate(date: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return 0;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay();
+}
+
+export function startFitsOpenWindow(startMin: number, durationMin: number, openMin: number, closeMin: number, closed: boolean) {
+  if (closed || durationMin <= 0) return false;
+  return startMin >= openMin && startMin + durationMin <= closeMin;
+}
+
 export function formatWhen(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -135,7 +165,7 @@ export function listOpenSlots(input: {
     if (input.now && start.getTime() <= input.now.getTime()) continue;
     const overlapsBusy = input.busy.some((range) => intervalsOverlap({ start, end }, range));
     if (overlapsBusy) continue;
-    slots.push({ start, end, label: formatTime(start, input.timeZone) });
+    slots.push({ start, end, label: formatTimeRange(start, end, input.timeZone) });
   }
   return slots;
 }

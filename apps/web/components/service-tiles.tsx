@@ -35,11 +35,11 @@ export function ServiceTiles({
               type="button"
               aria-pressed={on}
               onClick={() => onToggle(item.id)}
-              className={`relative flex h-[100px] flex-col items-center justify-center rounded-2xl px-2 text-center ${on ? "bg-gold text-ink shadow-card" : "border border-line bg-white text-ink"}`}
+              className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl px-2 py-2 text-center ${on ? "bg-gold text-ink shadow-card" : "border border-line bg-white text-ink"}`}
             >
               {on ? <span className="absolute right-2 top-2 text-sm">✓</span> : null}
               <span className="text-sm font-medium leading-tight">{item.name}</span>
-              <span className="mt-1 text-xs">{formatCents(item.priceCents)}</span>
+              <span className="mt-1 text-xs">{formatCents(item.priceCents)} · {item.durationMin} min</span>
             </button>
           );
         })}

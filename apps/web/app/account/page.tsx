@@ -1,4 +1,5 @@
 import { CustomerFrame } from "@/components/customer-frame";
+import { SignOutButton } from "@/components/sign-out-button";
 import { InstallHint } from "@/components/install-hint";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { PhotoThumb } from "@/components/photo-thumb";
@@ -58,8 +59,13 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
 
   return (
     <CustomerFrame>
-      <h1 className="font-serif text-5xl italic text-wine">Your visits</h1>
-      <p className="mt-2 text-sm text-bark">{user.name}</p>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-5xl italic text-wine">Your visits</h1>
+          <p className="mt-2 text-sm text-bark">{user.name}</p>
+        </div>
+        <SignOutButton className="shrink-0 rounded-full border border-line bg-white px-4 py-2 text-sm" />
+      </div>
       <InstallHint />
       {saved ? (
         <div className="mt-4">

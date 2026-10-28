@@ -346,6 +346,7 @@ model Appointment {
   notes          String?
   reminderSentAt DateTime?
   idempotencyKey String?
+  reference      String?           @unique
   createdAt      DateTime          @default(now())
   lines          AppointmentLine[]
   orders         Order[]

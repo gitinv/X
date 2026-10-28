@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { nextDateKey, zonedDayKey, zonedTimeToUtc } from "@redlady/core";
+import { nextDateKey, reservedMinutes, startFitsOpenWindow, zonedDayKey, zonedTimeToUtc } from "@redlady/core";
 import type { ProductCategory } from "../src/generated/tenant";
 import { getTenantClient, platform, urlForDatabase } from "../src/clients";
 import { createPhysicalDatabase, migrateTenantUrl, resolveTenantUrl } from "../src/provision";
@@ -608,7 +608,7 @@ async function main() {
       const close = sunday ? (studio === "chantilly" ? 17 * 60 : 16 * 60) : 19 * 60;
       if (!closed) {
         const startMin = Math.max(preferredMin, open);
-        if (startMin + durationMin <= close) {
+        if (startFitsOpenWindow(startMin, durationMin, open, close, false)) {
           return { startAt: zonedTimeToUtc(key, startMin, tz), endAt: zonedTimeToUtc(key, startMin + durationMin, tz) };
         }
       }
@@ -628,7 +628,7 @@ async function main() {
       clientId: ava.id,
       technicianId: chloe.id,
       serviceId: classic.id,
-      ...placeVisit(-3, 11 * 60, classic.durationMin, "chantilly"),
+      ...placeVisit(-3, 11 * 60, reservedMinutes(classic), "chantilly"),
       status: "COMPLETED",
       paymentStatus: "PAID",
     },
@@ -640,7 +640,7 @@ async function main() {
       clientId: eleanor.id,
       technicianId: yuki.id,
       serviceId: velvet.id,
-      ...placeVisit(-1, 11 * 60, velvet.durationMin, "chantilly"),
+      ...placeVisit(-1, 11 * 60, reservedMinutes(velvet), "chantilly"),
       status: "COMPLETED",
       paymentStatus: "PAID",
     },
@@ -653,7 +653,7 @@ async function main() {
         clientId: eleanor.id,
         technicianId: chloe.id,
         serviceId: gel.id,
-        ...placeVisit(0, 14 * 60, gel.durationMin, "chantilly"),
+        ...placeVisit(0, 14 * 60, reservedMinutes(gel), "chantilly"),
         status: "IN_SERVICE",
         paymentStatus: "UNPAID",
       },
@@ -663,7 +663,7 @@ async function main() {
         clientId: gemma.id,
         technicianId: sophia.id,
         serviceId: lavender.id,
-        ...placeVisit(0, 16 * 60, lavender.durationMin, "chantilly"),
+        ...placeVisit(0, 16 * 60, reservedMinutes(lavender), "chantilly"),
         status: "CHECKED_IN",
         paymentStatus: "UNPAID",
       },
@@ -673,7 +673,7 @@ async function main() {
         clientId: noah.id,
         technicianId: marcus.id,
         serviceId: dip.id,
-        ...placeVisit(0, 15 * 60, dip.durationMin, "fairfax"),
+        ...placeVisit(0, 15 * 60, reservedMinutes(dip), "fairfax"),
         status: "BOOKED",
         paymentStatus: "UNPAID",
         notes: "First visit. Wants a short square.",
@@ -684,7 +684,7 @@ async function main() {
         clientId: ava.id,
         technicianId: chloe.id,
         serviceId: classic.id,
-        ...placeVisit(1, 11 * 60, classic.durationMin, "chantilly"),
+        ...placeVisit(1, 11 * 60, reservedMinutes(classic), "chantilly"),
         status: "BOOKED",
         paymentStatus: "UNPAID",
       },
@@ -694,7 +694,7 @@ async function main() {
         clientId: priya.id,
         technicianId: yuki.id,
         serviceId: change.id,
-        ...placeVisit(0, 12 * 60, change.durationMin, "fairfax"),
+        ...placeVisit(0, 12 * 60, reservedMinutes(change), "fairfax"),
         status: "CHECKED_IN",
         paymentStatus: "UNPAID",
       },

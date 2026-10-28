@@ -5,7 +5,7 @@ import { buttonClass } from "@/components/ui";
 import { FavoriteToggle } from "@/components/favorite-mark";
 import { favoriteCardClass } from "@redlady/core";
 import { ServiceTiles, TicketTotal } from "@/components/service-tiles";
-import { formatCents, reservedMinutes, serviceGroup, sortByFavorite, toggleBookedService, uniqueStartSlots, type AlternateLocation } from "@redlady/core";
+import { formatCents, formatTime, formatWallClock, reservedMinutes, serviceGroup, sortByFavorite, toggleBookedService, uniqueStartSlots, weekdayOfDate, type AlternateLocation } from "@redlady/core";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -34,6 +34,8 @@ interface LocationChoice {
   slug: string;
   name: string;
   address: string;
+  timezone: string;
+  hours: { dayOfWeek: number; openMin: number; closeMin: number; closed: boolean }[];
 }
 
 interface LocationOffer {
@@ -43,6 +45,10 @@ interface LocationOffer {
   priceCents: number | null;
   durationMin: number | null;
   bufferMin: number | null;
+}
+
+function LinkHint() {
+  return <>Sign in to save favorite techs.</>;
 }
 
 function BookingPending() {
@@ -115,7 +121,6 @@ export function BookingWizard({
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
-  const [done, setDone] = useState<{ when: string; service: string; technician: string; location: string } | null>(null);
   const [pendingAlternate, setPendingAlternate] = useState<{ locationSlug: string; locationName: string; technicianId: string; technicianName: string; startIso: string; label: string } | null>(null);
   const [starred, setStarred] = useState<string[]>(favoriteIds);
   const orderSnapshot = useRef(favoriteIds);
@@ -164,7 +169,6 @@ export function BookingWizard({
     const chosenLocation = choice?.locationSlug ?? location?.slug;
     const chosenTech = choice?.technicianId ?? technician?.id ?? slotTechId;
     const chosenStart = choice?.startIso ?? startIso;
-    const techName = choice?.technicianName ?? technician?.name ?? slots.find((slot) => slot.technicianId === chosenTech)?.technicianName ?? "";
     if (!chosenLocation || !chosenStart || selectedIds.length === 0) return;
     bookingLock.current = true;
     setPending(true);
@@ -185,49 +189,19 @@ export function BookingWizard({
         setError(result.error);
         return;
       }
-      setDone({ when: result.when, service: result.service, technician: techName || result.technician, location: result.location });
+      router.push(`/book/confirmation/${result.reference}`);
     } finally {
       bookingLock.current = false;
       setPending(false);
     }
   }
 
-  if (done) {
-    return (
-      <section className="rounded-[2rem] bg-white p-8 shadow-card">
-        <p className="text-xs uppercase tracking-[0.18em] text-bark">Reserved</p>
-        <h1 className="mt-2 font-serif text-5xl italic text-wine">You&apos;re on the book.</h1>
-        <p className="mt-4 text-lg">
-          {done.service} with {done.technician}
-        </p>
-        <p className="text-bark">
-          {done.location} · {done.when}
-        </p>
-        <p className="mt-4 text-sm text-bark">
-          You&apos;re booked! We&apos;ll text you a reminder.{" "}
-          {signedIn ? (
-            <a className="underline" href="/account">
-              Your visits
-            </a>
-          ) : (
-            <>
-              <a className="underline" href="/login">
-                Sign in
-              </a>{" "}
-              or{" "}
-              <a className="underline" href="/signup">
-                create an account
-              </a>{" "}
-              to see it later.
-            </>
-          )}
-        </p>
-      </section>
-    );
-  }
+  const hoursToday = location?.hours.find((row) => row.dayOfWeek === weekdayOfDate(date));
+  const closing = !hoursToday || hoursToday.closed ? `${location?.name ?? "This studio"} is closed that day.` : `${location?.name ?? "This studio"} is open until ${formatWallClock(hoursToday.closeMin)}. A time is offered only when the whole visit ends by closing, and by the end of that technician's shift.`;
+  const finishLabel = startIso && blockMinutes > 0 && location ? formatTime(new Date(new Date(startIso).getTime() + blockMinutes * 60_000), location.timezone) : "";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+    <div className="grid gap-6 pb-28 lg:grid-cols-[1.1fr_0.9fr] md:pb-0">
       <section className="space-y-6">
         <div>
           <h1 className="font-serif text-5xl italic leading-none text-wine">Reserve a chair</h1>
@@ -270,7 +244,11 @@ export function BookingWizard({
           <p className="text-sm text-bark">
             <span className="font-medium text-ink">Favorites.</span> Star as many technicians as you like. The order updates the next time you open the book.
           </p>
-        ) : null}
+        ) : (
+          <p className="text-sm text-bark">
+            <LinkHint />
+          </p>
+        )}
         <p className="text-sm text-bark">{blockMinutes > 0 ? `${blockMinutes} min together · ${formatCents(chosen.reduce((sum, item) => sum + item.priceCents, 0))}` : "Select services to see the block."}</p>
         <button type="button" onClick={() => setTechnician(null)} className={buttonClass(technician ? "ghost" : "solid")}>Any technician</button>
         <div className="grid grid-cols-2 gap-2">
@@ -301,14 +279,18 @@ export function BookingWizard({
           <span className="mb-1 block text-bark">Date</span>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </label>
+        <p className="text-sm text-bark">{closing}</p>
         <div className="flex flex-wrap gap-2">
           {loadingSlots ? <p className="text-sm text-bark">Checking the book…</p> : null}
           {!loadingSlots && selectedIds.length > 0 && slots.length === 0 ? <p className="text-sm text-bark">No open times at {location?.name} that day.</p> : null}
-          {(technician ? slots : uniqueStartSlots(slots)).map((slot) => (
-            <button key={slot.startIso} type="button" onClick={() => { setStartIso(slot.startIso); setSlotTechId(technician ? slot.technicianId : ""); }} className={buttonClass(startIso === slot.startIso ? "solid" : "ghost", "px-3 py-2")}>
-              {slot.label}
-            </button>
-          ))}
+          {(technician ? slots : uniqueStartSlots(slots)).map((slot) => {
+            const selected = startIso === slot.startIso;
+            return (
+              <button key={slot.startIso} type="button" aria-pressed={selected} onClick={() => { setStartIso(slot.startIso); setSlotTechId(technician ? slot.technicianId : ""); }} className={buttonClass(selected ? "solid" : "ghost", selected ? "px-3 py-2 ring-2 ring-ink ring-offset-2" : "px-3 py-2")}>
+                {slot.label}
+              </button>
+            );
+          })}
         </div>
         {alternates.length > 0 ? (
           <div className="rounded-2xl bg-cream p-3">
@@ -382,6 +364,13 @@ export function BookingWizard({
           {pending ? <BookingPending /> : "Book appointment"}
         </button>
       </aside>
+      <div className="fixed inset-x-0 z-30 border-t border-line bg-white px-4 py-3 md:hidden" style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
+        <p className="text-sm font-medium">{formatCents(chosen.reduce((sum, item) => sum + item.priceCents, 0))}</p>
+        <p className="text-xs text-bark">
+          {blockMinutes > 0 ? `${blockMinutes} min` : "Choose services"}
+          {finishLabel ? ` · done at ${finishLabel}` : ""}
+        </p>
+      </div>
     </div>
   );
 }

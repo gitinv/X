@@ -441,6 +441,45 @@ describe("salon database rules", () => {
     });
     expect(await salon.db.appointmentLine.count({ where: { appointmentId: mixed.id } })).toBe(3);
   });
+
+  it("asks a returning guest to verify, then keeps the earlier visit on that profile", async () => {
+    const salon = await makeSalon("guest");
+    const guest = await salon.db.client.create({
+      data: { tenantId: salon.tenant.id, name: "Guest", email: "Guest@Example.com", phone: "(703) 555-0188" },
+    });
+    const visit = await createBooking(salon.db, {
+      tenantId: salon.tenant.id,
+      locationId: salon.location.id,
+      clientId: guest.id,
+      technicianId: salon.technician.id,
+      serviceId: salon.service.id,
+      startAt: new Date("2026-08-05T15:00:00Z"),
+      endAt: new Date("2026-08-05T15:45:00Z"),
+    });
+    const empty = await salon.db.client.create({
+      data: { tenantId: salon.tenant.id, name: "Empty", email: "guest@example.com", phone: "7035550188" },
+    });
+    const started = await registerCustomer(salon.db, {
+      tenantId: salon.tenant.id,
+      name: "Guest",
+      email: "guest@example.com",
+      phone: "703-555-0188",
+      passwordHash: "hash",
+    });
+    expect(started.status).toBe("verify");
+    if (started.status !== "verify") return;
+    const linked = await confirmSignup(salon.db, {
+      tenantId: salon.tenant.id,
+      challengeId: started.challengeId,
+      code: started.demoCode,
+      name: "Guest",
+      passwordHash: "hash",
+    });
+    expect(linked.user.clientId).toBe(guest.id);
+    const kept = await salon.db.appointment.findUnique({ where: { id: visit.id } });
+    expect(kept?.clientId).toBe(guest.id);
+    expect(empty.id).not.toBe(guest.id);
+  });
 });
 
 afterAll(async () => {

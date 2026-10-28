@@ -15,12 +15,33 @@ export class ExistingClientError extends Error {
   }
 }
 
-export async function findClientByContact(db: Db, tenantId: string, phone: string, email: string) {
+function contactMatches(client: { email: string | null; phone: string | null }, email: string, phone: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  const clients = await db.client.findMany({ where: { tenantId } });
+  return (normalizedEmail.length > 0 && client.email?.toLowerCase() === normalizedEmail) || samePhone(client.phone, phone);
+}
+
+export async function findClientByContact(db: Db, tenantId: string, phone: string, email: string) {
+  const clients = await db.client.findMany({
+    where: { tenantId },
+    include: { _count: { select: { appointments: true } } },
+  });
   return (
-    clients.find((client) => (normalizedEmail && client.email?.toLowerCase() === normalizedEmail) || samePhone(client.phone, phone)) ?? null
+    clients
+      .filter((client) => contactMatches(client, email, phone))
+      .sort((left, right) => right._count.appointments - left._count.appointments)[0] ?? null
   );
+}
+
+export async function adoptGuestVisits(db: Db, input: { tenantId: string; clientId: string; email: string; phone: string }) {
+  const tenantId = requireTenantId(input.tenantId);
+  const clients = await db.client.findMany({ where: { tenantId, NOT: { id: input.clientId } }, include: { user: true } });
+  const donors = clients.filter((client) => !client.user && contactMatches(client, input.email, input.phone));
+  if (donors.length === 0) return 0;
+  const moved = await db.appointment.updateMany({
+    where: { tenantId, clientId: { in: donors.map((client) => client.id) } },
+    data: { clientId: input.clientId },
+  });
+  return moved.count;
 }
 
 export async function writeAudit(
@@ -329,6 +350,7 @@ export async function registerCustomer(
       clientId: client.id,
     },
   });
+  await adoptGuestVisits(db, { tenantId, clientId: client.id, email, phone });
   return { status: "created" as const, user, client };
 }
 
@@ -358,6 +380,7 @@ export async function confirmSignup(db: Db, input: { tenantId: string; challenge
     },
   });
   await db.signupCode.delete({ where: { id: challenge.id } });
+  await adoptGuestVisits(db, { tenantId, clientId: client.id, email: challenge.email || client.email || "", phone: challenge.phone || client.phone || "" });
   return { user, client };
 }
 

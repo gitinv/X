@@ -1,4 +1,4 @@
-import { logout } from "@/app/login/actions";
+import { SignOutButton } from "@/components/sign-out-button";
 import { buttonClass } from "@/components/ui";
 import type { Role } from "@redlady/core";
 import Link from "next/link";
@@ -40,9 +40,7 @@ export function CustomerShell({
               </Link>
             ))}
             {signedInName ? (
-              <form action={logout}>
-                <button className="text-bark hover:text-ink">Sign out</button>
-              </form>
+              <SignOutButton className="text-bark hover:text-ink" />
             ) : (
               <Link href="/login" className={buttonClass("solid", "px-3 py-2")}>
                 Sign in
@@ -51,13 +49,25 @@ export function CustomerShell({
           </nav>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 md:pb-16">{children}</main>
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-line bg-white/95 px-2 py-2 backdrop-blur md:hidden">
-        {customerLinks.map((link) => (
-          <Link key={link.href} href={link.href} className="py-2 text-center text-[11px] font-medium text-ink">
-            {link.label}
-          </Link>
-        ))}
+      <main className="mx-auto w-full max-w-5xl px-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-6 md:pb-16">{children}</main>
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white/95 px-1 pt-1 backdrop-blur md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        <div className="grid grid-cols-6">
+          {customerLinks.map((link) => (
+            <Link key={link.href} href={link.href} className="flex min-h-11 items-center justify-center px-1 py-2 text-center text-[10px] font-medium leading-tight text-ink">
+              {link.label}
+            </Link>
+          ))}
+          {signedInName ? (
+            <div className="flex min-h-11 flex-col items-center justify-center px-1 py-2 text-center text-[10px] font-medium leading-tight text-ink">
+              <Link href="/account">Account</Link>
+              <SignOutButton className="text-[10px] font-medium text-bark" />
+            </div>
+          ) : (
+            <Link href="/login" className="flex min-h-11 items-center justify-center px-1 py-2 text-center text-[10px] font-medium leading-tight text-ink">
+              Sign in
+            </Link>
+          )}
+        </div>
       </nav>
     </div>
   );
@@ -98,9 +108,9 @@ export function StaffShell({
                 {link.label}
               </Link>
             ))}
-          <form action={logout} className="px-3 py-2">
-            <button className="text-sm text-gold">Sign out</button>
-          </form>
+          <div className="px-3 py-2">
+            <SignOutButton className="text-sm text-gold" />
+          </div>
         </nav>
       </aside>
       <div className="px-4 py-6 md:px-8">{children}</div>

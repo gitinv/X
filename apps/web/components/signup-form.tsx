@@ -70,7 +70,11 @@ export function SignupForm() {
       <label className="block text-sm">Name<input name="name" required /></label>
       <label className="block text-sm">Email<input name="email" type="email" /></label>
       <label className="block text-sm">Phone<input name="phone" /></label>
-      <label className="block text-sm">Password<input name="password" type="password" minLength={8} required /></label>
+      <label className="block text-sm">
+        Password
+        <input name="password" type="password" minLength={8} required />
+        <span className="mt-1 block text-xs text-bark">At least 8 characters.</span>
+      </label>
       {error ? <p className="text-sm text-wine">{error}</p> : null}
       <button className={buttonClass("solid")} disabled={pending}>{pending ? "Creating…" : "Create account"}</button>
       <p className="text-sm"><Link href="/login" className="underline">Already have a login? Sign in</Link></p>

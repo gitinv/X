@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { InventoryError, blockFitsShift, checkoutTotal, findBookingConflict, minutesInZone, planInventoryDecrement, requireTenantId } from "@redlady/core";
 import { Prisma, type PaymentMethod, type PrismaClient } from "./generated/tenant";
 
@@ -89,6 +90,11 @@ export async function ensureBlockIsFree(
   if (conflict) throw new BookingConflictError(conflict.id);
 }
 
+function bookingReference() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return `RL-${[...randomBytes(6)].map((byte) => alphabet[byte % alphabet.length]).join("")}`;
+}
+
 function unavailable(error: unknown): never {
   const message = error instanceof Error ? error.message : "";
   if (message.includes("Appointment_technician_time_excl") || message.includes("23P01") || message.includes("exclusion constraint")) {
@@ -125,6 +131,12 @@ export async function createBooking(
         if (prior) return prior;
       }
       await ensureBlockIsFree(tx, input);
+      let reference = bookingReference();
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const taken = await tx.appointment.findFirst({ where: { reference } });
+        if (!taken) break;
+        reference = bookingReference();
+      }
       const service = await tx.service.findFirst({ where: { id: input.serviceId, tenantId } });
       if (!service) throw new Error("That service is not on the menu.");
       const override = await tx.serviceLocation.findUnique({
@@ -141,6 +153,7 @@ export async function createBooking(
           endAt: input.endAt,
           notes: input.notes,
           idempotencyKey,
+          reference,
           status: "BOOKED",
           paymentStatus: "UNPAID",
         },

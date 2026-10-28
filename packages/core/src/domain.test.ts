@@ -8,7 +8,7 @@ import { dollarsToCents, formatClock, parseClock } from "./money";
 import { billingMode, resolveSmsDriverName } from "./sms";
 import { TenantIsolationError, assertSameTenant, requireTenantId, scopeWhere } from "./tenant";
 import { canEditFavorites, favoriteCardClass, favoriteNote, normalizePhone, samePhone, sortByFavorite } from "./favorites";
-import { formatDateTimeLocal, listOpenSlots, nextDateKey, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
+import { formatDateTimeLocal, formatTimeRange, formatWallClock, listOpenSlots, nextDateKey, startFitsOpenWindow, zonedDateTimeToUtc, zonedTimeToUtc } from "./time";
 import { assertSingleCoreServices, blockFitsShift, checkoutTotal, discountCents, refundDecision, requireServiceMinutes, serviceGroup, slotWithinShifts, summarizeSales, ticketSummary, toggleBookedService, uniqueStartSlots } from "./ticket";
 import { buildTurnBoard, type TurnVisit } from "./turns";
 
@@ -217,7 +217,25 @@ describe("slots and money", () => {
       busy: [{ start: zonedTimeToUtc("2026-01-15", 9 * 60, "America/New_York"), end: zonedTimeToUtc("2026-01-15", 10 * 60, "America/New_York") }],
       now: zonedTimeToUtc("2026-01-15", 8 * 60, "America/New_York"),
     });
-    expect(slots.map((slot) => slot.label)).toEqual(["10:00 AM"]);
+    expect(slots.map((slot) => slot.label)).toEqual(["10:00–11:00 AM"]);
+    const evening = listOpenSlots({
+      date: "2026-07-15",
+      timeZone: "America/New_York",
+      openMin: 9 * 60,
+      closeMin: 19 * 60,
+      closed: false,
+      durationMin: 95,
+      busy: [],
+      now: zonedTimeToUtc("2026-07-15", 8 * 60, "America/New_York"),
+    });
+    expect(evening.at(-1)?.label).toBe("5:00–6:35 PM");
+    expect(evening.some((slot) => slot.label.startsWith("5:30"))).toBe(false);
+    expect(formatWallClock(19 * 60)).toBe("7:00 PM");
+    expect(formatTimeRange(evening.at(-1)!.start, evening.at(-1)!.end, "America/New_York")).toBe("5:00–6:35 PM");
+    expect(startFitsOpenWindow(17 * 60, 95, 9 * 60, 19 * 60, false)).toBe(true);
+    expect(startFitsOpenWindow(17 * 60, 95, 9 * 60, 18 * 60, false)).toBe(false);
+    expect(blockFitsShift(17 * 60, 95, [{ startMin: 9 * 60, endMin: 19 * 60 }], true)).toBe(true);
+    expect(blockFitsShift(17 * 60, 95, [{ startMin: 9 * 60, endMin: 18 * 60 }], true)).toBe(false);
   });
 
   it("parses prices and clocks", () => {

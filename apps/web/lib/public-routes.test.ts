@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GET } from "../app/api/pwa/manifest/route";
 import { demoHints } from "./demo-accounts";
+import { SESSION_COOKIE, sessionCookieOptions } from "./auth/token";
 
 describe("public routes", () => {
   it("GET /api/pwa/manifest points at the real manifest", async () => {
@@ -18,5 +19,12 @@ describe("public routes", () => {
     expect(hints.length).toBeGreaterThan(0);
     expect(hints.some((account) => account.email === "platform@redladyspa.com")).toBe(false);
     process.env.DEMO_HINTS = previous;
+  });
+
+  it("clears the session cookie with the same path and a zero lifetime", () => {
+    const cleared = sessionCookieOptions(0);
+    expect(cleared).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 0 });
+    expect(SESSION_COOKIE).toBe("redlady_session");
+    expect(sessionCookieOptions(60).maxAge).toBe(60);
   });
 });

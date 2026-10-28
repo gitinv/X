@@ -61,6 +61,8 @@ export default async function BookPage({
           slug: location.slug,
           name: location.name,
           address: location.address,
+          timezone: location.timezone,
+          hours: location.hours.map((row) => ({ dayOfWeek: row.dayOfWeek, openMin: row.openMin, closeMin: row.closeMin, closed: row.closed })),
         }))}
         offers={offers.map((offer) => ({
           locationId: offer.locationId,

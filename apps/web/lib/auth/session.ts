@@ -3,7 +3,7 @@ import { platform, type TenantClient } from "@redlady/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getPublicTenant, type PublicSalon } from "../tenant";
-import { SESSION_COOKIE, readSessionToken, signSession, type SessionClaims } from "./token";
+import { SESSION_COOKIE, SESSION_MAX_AGE, readSessionToken, sessionCookieOptions, signSession, type SessionClaims } from "./token";
 
 export type Membership = { locationId: string; role: Role };
 
@@ -36,19 +36,13 @@ export async function getSession() {
 export async function setSessionCookie(session: SessionClaims) {
   const token = await signSession(session);
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 14,
-  });
+  jar.set(SESSION_COOKIE, token, sessionCookieOptions(SESSION_MAX_AGE));
   return token;
 }
 
 export async function clearSessionCookie() {
   const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
+  jar.set(SESSION_COOKIE, "", sessionCookieOptions(0));
 }
 
 export async function requireUser(): Promise<AppUser> {

@@ -63,17 +63,17 @@ export function FavoriteMark({
   name: string;
   onToggle?: () => void;
 }) {
-  const className = `inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl leading-none ${active ? "text-gold" : "text-bark"}`;
+  const className = `inline-flex h-12 w-12 min-h-12 min-w-12 shrink-0 items-center justify-center rounded-full text-2xl leading-none ${active ? "text-[#D4AF37]" : "text-bark"}`;
   if (!editable) {
     if (!active) return null;
     return (
-      <span className={className} title="Favorite technician">
+      <span className={className} title="Favorite">
         ★
       </span>
     );
   }
   return (
-    <button type="button" className={className} aria-pressed={active} aria-label={active ? `Remove ${name} from favorites` : `Mark ${name} as a favorite`} onClick={onToggle}>
+    <button type="button" className={className} title="Favorite" aria-pressed={active} aria-label={active ? `Remove ${name} from favorites` : `Favorite ${name}`} onClick={onToggle}>
       {active ? "★" : "☆"}
     </button>
   );

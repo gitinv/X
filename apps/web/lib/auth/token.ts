@@ -2,6 +2,17 @@ import { SignJWT, jwtVerify } from "jose";
 import type { Role } from "@redlady/core";
 
 export const SESSION_COOKIE = "redlady_session";
+export const SESSION_MAX_AGE = 60 * 60 * 24 * 14;
+
+export function sessionCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge,
+  };
+}
 
 export interface SessionClaims {
   userId: string;
